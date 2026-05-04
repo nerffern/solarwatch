@@ -1,0 +1,38 @@
+# ASGI framework
+fastapi>=0.111,<1.0
+
+# ASGI server — used for both development (run.py) and production (gunicorn worker)
+uvicorn[standard]>=0.29,<1.0
+
+# Starlette is FastAPI's foundation — provides sessions, middleware, static files
+starlette>=0.37,<1.0
+
+# Required for parsing HTML form data (login, admin forms)
+python-multipart>=0.0.9,<1.0
+
+# Signs session cookies — must be installed for SessionMiddleware
+itsdangerous>=2.1,<3.0
+
+# Loads .env files in development
+python-dotenv>=1.0,<2.0
+
+# Database ORM / connection management
+SQLAlchemy>=2.0,<3.0
+
+# PostgreSQL driver
+psycopg2-binary>=2.9,<3.0
+
+# Password hashing (check_password_hash / generate_password_hash)
+werkzeug>=3.0,<4.0
+
+# Production process manager — runs multiple uvicorn workers per pod
+gunicorn>=21.2,<22.0
+
+# Database migrations — tracks schema changes across deployments
+alembic>=1.13,<2.0
+
+# Per-IP rate limiting — protects the login endpoint from brute force
+slowapi>=0.1.9,<1.0
+
+#Jinja2
+jinja2>=3.1,<4.0

@@ -1,0 +1,46 @@
+version: "3.9"
+
+# Local development only. Do NOT use this in production.
+# Gives you the app + a local Postgres in one command:
+#
+#   docker compose up
+#
+# The app will be available at http://localhost:8000
+# Postgres will be available at localhost:5432
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      SECRET_KEY: dev-secret-key-change-in-production
+      DATABASE_URL: postgresql+psycopg2://app_user:changeme@db:5432/app_db
+      APP_ADMIN_USERNAME: admin
+      APP_ADMIN_PASSWORD: Admin1234
+      APP_PROXY_FIX: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Override the production CMD for local dev — single worker, no gunicorn.
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: app_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_user -d app_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

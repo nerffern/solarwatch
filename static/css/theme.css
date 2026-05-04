@@ -1,0 +1,56 @@
+:root {
+  /* =========================
+     Brand Colours
+     ========================= */
+  --wts-blue: #1E4F8A;
+  --wts-teal: #0EA5A4;
+  --wts-green: #22C55E;
+
+  /* =========================
+     Semantic Colours
+     ========================= */
+  --color-primary: var(--wts-teal);
+  --color-secondary: var(--wts-blue);
+  --color-accent: var(--wts-green);
+
+  --color-success: var(--wts-green);
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+
+  /* =========================
+     Backgrounds
+     ========================= */
+  --bg-main: #F8FAFC;
+  --bg-surface: #FFFFFF;
+  --bg-dark: #0F172A;
+
+  /* =========================
+     Text
+     ========================= */
+  --text-main: #0F172A;
+  --text-muted: #64748B;
+  --text-invert: #FFFFFF;
+
+  /* =========================
+     Borders & Effects
+     ========================= */
+  --border-color: #E5E7EB;
+  --radius: 10px;
+  --focus-ring: 0 0 0 3px rgba(14, 165, 164, 0.4);
+}
+
+/* =========================
+   Dark Mode
+   ========================= */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-main: #020617;
+    --bg-surface: #0F172A;
+    --bg-dark: #020617;
+
+    --text-main: #E5E7EB;
+    --text-muted: #94A3B8;
+
+    --border-color: #1E293B;
+  }
+}

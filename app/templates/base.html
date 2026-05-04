@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="FastAPI SaaS starter template">
+    <meta name="theme-color" content="#0EA5A4">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Template App">
+
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" href="/static/icons/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+
+    <link rel="stylesheet" href="/static/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/css/theme.css">
+    <link rel="stylesheet" href="/static/css/material-symbols.css">
+
+    <title>FastAPI SaaS Template</title>
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom">
+      <div class="container">
+        <a class="navbar-brand fw-semibold" href="/">Template App</a>
+        <div class="ms-auto d-flex gap-2">
+          {% if current_user %}
+            <span class="navbar-text text-muted">
+              Signed in as {{ current_user.username }}
+            </span>
+            {% if current_user.role_name == "admin" %}
+              <a class="btn btn-outline-primary btn-sm" href="/auth/admin/users">User management</a>
+              <a class="btn btn-outline-primary btn-sm" href="/auth/admin/roles">Role management</a>
+            {% endif %}
+            <a class="btn btn-outline-secondary btn-sm" href="/auth/logout">Sign out</a>
+          {% else %}
+            <a class="btn btn-primary btn-sm" href="/auth/login">Sign in</a>
+          {% endif %}
+        </div>
+      </div>
+    </nav>
+
+    <div class="container mt-3">
+      {% if flash %}
+        <div class="alert alert-{{ flash[0] }} alert-dismissible fade show" role="alert">
+          {{ flash[1] }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% endif %}
+    </div>
+
+    {% block content %}{% endblock %}
+
+    <script src="/static/js/bootstrap.bundle.min.js" defer></script>
+  </body>
+</html>
