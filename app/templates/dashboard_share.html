@@ -6,13 +6,13 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SolarWatch">
+<meta name="apple-mobile-web-app-title" content="{{ site_display }}">
 <meta name="theme-color" content="#0a0c10">
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="/share/{{ share_token }}/manifest.json">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png">
-<title>SolarWatch</title>
+<title>{{ site_display }} — SolarWatch</title>
 <meta name="description" content="Multi-site solar inverter monitoring — live power flow, battery SOC, grid and load data.">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <script src="/static/js/vendor/chart.umd.min.js"></script>
@@ -57,13 +57,6 @@ header{
 }
 .vbtn.active{background:var(--solar);color:#000;border-color:var(--solar)}
 .vbtn:hover:not(.active){border-color:var(--muted);color:var(--text)}
-.admin-btn{
-  font-family:var(--sans);font-size:clamp(9px,.82vw,12px);font-weight:700;
-  padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid rgba(245,166,35,.4);
-  background:transparent;color:var(--solar);letter-spacing:.06em;text-transform:uppercase;
-  text-decoration:none;transition:all .2s;display:inline-flex;align-items:center;gap:4px;
-}
-.admin-btn:hover{background:rgba(245,166,35,.12);border-color:var(--solar);}
 
 /* Cycle button */
 .cycle-btn{
@@ -570,9 +563,6 @@ footer{
       </select>
     </div>
 
-    <!-- Admin link (visible to all logged-in users, links to admin or dashboard settings) -->
-    <a class="admin-btn" href="/auth/admin" title="Admin console">⚙ Admin</a>
-
     <!-- Age -->
     <div class="age-badge"><div class="dot" id="dot"></div><span id="age">—</span></div>
   </div>
@@ -775,6 +765,21 @@ footer{
 
 <script>
 // ── STATE ─────────────────────────────────────────────────────────────────────
+// ── Share mode ───────────────────────────────────────────────────────────
+// These are injected by the server when serving a public share link.
+// In share mode all API calls go to /api/share/{token}/* and the site
+// selector is locked to the single shared site.
+const SHARE_TOKEN = '{{ share_token }}';
+const SHARE_SITE  = '{{ site_name }}';
+const IS_SHARE    = Boolean(SHARE_TOKEN);
+
+// Build the correct API base path for this context
+function apiPath(endpoint) {
+  return IS_SHARE
+    ? `/api/share/${SHARE_TOKEN}/${endpoint}`
+    : `/api/solar/${endpoint}`;
+}
+
 let currentSite=null, currentView='basic', cycleOn=false, cycleTimer=null;
 let cycleDuration=15; // seconds
 let clockVisible=false, clockTimer=null;
@@ -1136,13 +1141,13 @@ async function loadCharts(){
   const site=encodeURIComponent(currentSite);
   const get=url=>fetch(url).then(r=>r.json()).catch(e=>{console.error(url,e);return null;});
   const [pvR,loadR,battR,gridR,dailyR,tempR,peakR]=await Promise.all([
-    get(`/api/solar/chart/pv?site=${site}`),
-    get(`/api/solar/chart/load?site=${site}`),
-    get(`/api/solar/chart/battery?site=${site}`),
-    get(`/api/solar/chart/grid?site=${site}`),
-    get(`/api/solar/chart/daily?site=${site}`),
-    get(`/api/solar/chart/temps?site=${site}`),
-    get(`/api/solar/chart/peaks?site=${site}`),
+    get(`${apiPath('chart/pv')}?site=${site}`),
+    get(`${apiPath('chart/load')}?site=${site}`),
+    get(`${apiPath('chart/battery')}?site=${site}`),
+    get(`${apiPath('chart/grid')}?site=${site}`),
+    get(`${apiPath('chart/daily')}?site=${site}`),
+    get(`${apiPath('chart/temps')}?site=${site}`),
+    get(`${apiPath('chart/peaks')}?site=${site}`),
   ]);
 
   // Compute shared x-axis bounds from all time-series datasets so all
@@ -1375,7 +1380,7 @@ let monthlyTimer = null;
 async function refreshMonthly(){
   if(!currentSite) return;
   try{
-    const r = await fetch(`/api/solar/monthly?site=${encodeURIComponent(currentSite)}`);
+    const r = await fetch(`${apiPath('monthly')}?site=${encodeURIComponent(currentSite)}`);
     const d = await r.json();
     if(!d.error) renderMonthly(d);
   } catch(e){ console.error('monthly fetch:', e); }
@@ -1425,7 +1430,7 @@ function fmtTime(iso){
 async function refreshWeather(){
   if(!currentSite) return;
   try{
-    const r = await fetch(`/api/solar/weather?site=${encodeURIComponent(currentSite)}`);
+    const r = await fetch(`${apiPath('weather')}?site=${encodeURIComponent(currentSite)}`);
     const d = await r.json();
     if(d.error || !d.temp_c) return; // no data yet — keep loading state
     renderWeather(d);
@@ -1495,7 +1500,7 @@ function renderWeather(d){
 async function refresh(){
   if(!currentSite)return;
   try{
-    const r=await fetch(`/api/solar/flow?site=${encodeURIComponent(currentSite)}`);
+    const r=await fetch(`${apiPath('flow')}?site=${encodeURIComponent(currentSite)}`);
     const d=await r.json();
     if(!d.error)render(d);
   }catch(e){console.error(e);}
@@ -1510,7 +1515,7 @@ function updateURL(siteName){
 }
 
 async function loadSites(){
-  const r=await fetch('/api/solar/sites');
+  const r=await fetch(apiPath('sites'));
   const sites=await r.json();
   const sel=document.getElementById('site-sel');
   sel.innerHTML=sites.map(s=>`<option value="${s.name}">${s.display}</option>`).join('');
@@ -1583,7 +1588,21 @@ function updateClock(){
 clockVisible = localStorage.getItem('sw_clock')=='1';
 applyClockState();
 
-loadSites();
+loadSites().then(() => {
+  if (IS_SHARE) {
+    // Lock site selector to the shared site
+    const sel = document.getElementById('site-sel');
+    if (sel) {
+      sel.disabled = true;
+      sel.title = 'Site is fixed for this share link';
+    }
+    // Hide admin button if present
+    const adminBtn = document.querySelector('.admin-btn');
+    if (adminBtn) adminBtn.style.display = 'none';
+    // Update page title
+    document.title = `${SHARE_SITE} — SolarWatch`;
+  }
+});
 </script>
 <script>
 // ── PWA: Service Worker + offline banner ──────────────────────────────────────

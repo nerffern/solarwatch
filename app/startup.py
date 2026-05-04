@@ -107,6 +107,40 @@ def _ensure_foundational_tables() -> List[str]:
                     """
                 )
             )
+            # share_token column — added by setup.sql / migrate_share.sql.
+            # We verify it exists here rather than ALTER TABLE, because
+            # solarwatch_user does not own the sites table (postgres superuser
+            # does) and cannot run DDL on it. Run migrate_share.sql as
+            # postgres if this check fails.
+            share_col = conn.execute(
+                text(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                    AND   table_name   = 'sites'
+                    AND   column_name  = 'share_token'
+                    """
+                )
+            ).fetchone()
+            if not share_col:
+                raise Exception(
+                    "share_token column missing from sites table. "
+                    "Run migrate_share.sql as the postgres superuser to add it."
+                )
+            # user_sites: maps users to the sites they can access.
+            # Admins bypass this table — they see all sites.
+            # site_admin and site_viewer are constrained to their assigned sites.
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_sites (
+                        user_id  INTEGER NOT NULL REFERENCES web_users(id) ON DELETE CASCADE,
+                        site_id  INTEGER NOT NULL REFERENCES sites(id)     ON DELETE CASCADE,
+                        PRIMARY KEY (user_id, site_id)
+                    )
+                    """
+                )
+            )
     except Exception as exc:
         return [f"Failed to ensure foundational tables: {exc}"]
     return []
@@ -115,33 +149,27 @@ def _ensure_foundational_tables() -> List[str]:
 def _ensure_system_roles() -> List[str]:
     try:
         with get_connection() as conn:
-            existing = {
-                row["name"]
-                for row in conn.execute(
-                    text("SELECT name FROM roles WHERE name IN ('admin', 'user')")
-                ).mappings()
-            }
             for role_name, description in (
-                ("admin", "Full administrative access"),
-                ("user", "Standard authenticated user"),
+                ("admin",       "Full administrative access — all sites, all users"),
+                ("user",        "Standard authenticated user — assigned sites only"),
+                ("site_admin",  "Site administrator — manage assigned sites and their users"),
+                ("site_viewer", "Read-only access to assigned sites"),
             ):
-                if role_name in existing:
-                    conn.execute(
-                        text(
-                            "UPDATE roles SET is_system = TRUE, enabled = TRUE WHERE name = :name"
-                        ),
-                        {"name": role_name},
-                    )
-                else:
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO roles (name, description, is_system, enabled)
-                            VALUES (:name, :description, TRUE, TRUE)
-                            """
-                        ),
-                        {"name": role_name, "description": description},
-                    )
+                # ON CONFLICT DO UPDATE makes this fully idempotent — safe to run
+                # on every startup regardless of whether the role already exists.
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO roles (name, description, is_system, enabled)
+                        VALUES (:name, :description, TRUE, TRUE)
+                        ON CONFLICT (name) DO UPDATE
+                            SET is_system   = TRUE,
+                                enabled     = TRUE,
+                                description = EXCLUDED.description
+                        """
+                    ),
+                    {"name": role_name, "description": description},
+                )
     except Exception as exc:
         return [f"Failed to ensure system roles: {exc}"]
     return []

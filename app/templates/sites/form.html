@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %} — {% if mode == 'create' %}Add site{% else %}{{ site.display_name }}{% endif %}{% endblock %}
+{% block content %}
+<div class="sw-page" style="max-width:900px">
+
+  <div class="sw-page-header">
+    <div>
+      <h1 class="sw-page-title">{% if mode == 'create' %}Add site{% else %}{{ site.display_name }}{% endif %}</h1>
+      <p class="sw-page-subtitle">{% if mode == 'create' %}Configure a new inverter site.{% else %}Edit site configuration and access.{% endif %}</p>
+    </div>
+    <a class="sw-btn ghost" href="/sites">← Sites</a>
+  </div>
+
+  <!-- ── Site details ── -->
+  <div class="sw-card">
+    <div class="sw-card-title">Site details</div>
+    <form method="post" action="/sites/{% if mode == 'create' %}new{% else %}{{ site.id }}/edit{% endif %}">
+
+      <div class="sw-form-row cols-2">
+        {% if mode == 'create' %}
+        <div class="sw-field">
+          <label>Site name <span class="req">*</span></label>
+          <input class="sw-input" name="site_name" placeholder="e.g. Selati" required>
+          <div class="sw-field-hint">Internal DB identifier — cannot be changed after creation.</div>
+        </div>
+        {% endif %}
+        <div class="sw-field">
+          <label>Display name <span class="req">*</span></label>
+          <input class="sw-input" name="display_name" value="{{ site.display_name if site else '' }}" placeholder="e.g. HFI Selati" required>
+        </div>
+        <div class="sw-field">
+          <label>Source type</label>
+          {% if mode == 'create' %}
+            <select class="sw-select" name="source_type" id="source_type_select">
+              <option value="deye">Deye — direct Modbus</option>
+              <option value="sunsynk">Sunsynk — cloud API</option>
+            </select>
+          {% else %}
+            <input class="sw-input" value="{{ site.source_type }}" disabled>
+            <div class="sw-field-hint">Cannot be changed after creation.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="sw-form-row single">
+        <div class="sw-field">
+          <label>Location</label>
+          <input class="sw-input" name="location" value="{{ site.location if site else '' }}" placeholder="e.g. Selati, Limpopo, ZA">
+        </div>
+      </div>
+
+      <div class="sw-form-row cols-2">
+        <div class="sw-field">
+          <label>Latitude</label>
+          <input class="sw-input" name="latitude" type="number" step="0.000001"
+                 value="{{ site.latitude if site and site.latitude else '' }}" placeholder="-24.052200">
+          <div class="sw-field-hint">Decimal degrees. Used for weather data.</div>
+        </div>
+        <div class="sw-field">
+          <label>Longitude</label>
+          <input class="sw-input" name="longitude" type="number" step="0.000001"
+                 value="{{ site.longitude if site and site.longitude else '' }}" placeholder="31.263700">
+        </div>
+      </div>
+
+      <div style="margin:.25rem 0 1rem">
+        <label class="sw-check">
+          <input type="checkbox" name="enabled"
+                 {% if mode == 'create' or (site and site.enabled) %}checked{% endif %}>
+          <div>
+            <div class="sw-check-label">Site enabled</div>
+            <div class="sw-check-hint">Disabled sites are ignored by the collector and hidden from the dashboard.</div>
+          </div>
+        </label>
+      </div>
+
+      <!-- Sunsynk credentials -->
+      <div id="sunsynk_fields" {% if mode == 'edit' and site.source_type != 'sunsynk' %}style="display:none"{% endif %}>
+        <hr class="sw-divider">
+        <div class="sw-card-title">Sunsynk cloud credentials</div>
+        <div class="sw-form-row cols-2">
+          <div class="sw-field">
+            <label>Username</label>
+            <input class="sw-input" name="sunsynk_username" value="{{ site.sunsynk_username if site else '' }}" placeholder="Portal username">
+          </div>
+          <div class="sw-field">
+            <label>Password</label>
+            <input class="sw-input" name="sunsynk_password" type="password"
+                   placeholder="{% if mode == 'edit' %}Leave blank to keep existing{% else %}Portal password{% endif %}">
+          </div>
+          <div class="sw-field">
+            <label>Plant ID</label>
+            <input class="sw-input" name="sunsynk_plant_id" value="{{ site.sunsynk_plant_id if site else '' }}" placeholder="Plant ID">
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:1.25rem">
+        <button class="sw-btn primary" type="submit">
+          {% if mode == 'create' %}Create site{% else %}Save changes{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+
+  {% if mode == 'edit' %}
+
+  <!-- ── Inverters (Deye only) ── -->
+  {% if site.source_type == 'deye' %}
+  <div class="sw-card">
+    <div class="sw-card-title">Inverters</div>
+
+    {% if inverters %}
+    <div class="sw-table-wrap" style="margin-bottom:1rem">
+      <table class="sw-table">
+        <thead>
+          <tr><th>Name</th><th>IP address</th><th>Dongle serial</th><th>Inverter SN</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for inv in inverters %}
+          <tr>
+            <td><code>{{ inv.name }}</code></td>
+            <td class="mono" style="color:var(--info)">{{ inv.ip }}</td>
+            <td class="mono" style="color:var(--muted);font-size:.8rem">{{ inv.dongle_serial }}</td>
+            <td class="mono" style="color:var(--muted);font-size:.8rem">{{ inv.inverter_sn }}</td>
+            <td>
+              <form method="post" action="/sites/{{ site.id }}/inverters/{{ loop.index0 }}/delete" class="sw-inline-action" style="justify-content:flex-end">
+                <input class="sw-input" name="admin_password" type="password" placeholder="Admin password" required>
+                <button class="sw-btn danger" style="font-size:.72rem;padding:4px 10px;white-space:nowrap" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:1rem">No inverters configured yet.</p>
+    {% endif %}
+
+    <hr class="sw-divider">
+    <div class="sw-section-label">Add inverter</div>
+    <form method="post" action="/sites/{{ site.id }}/inverters/add">
+      <div class="sw-form-row" style="grid-template-columns:2fr 2fr 1.5fr 1.5fr auto;gap:.5rem;align-items:end">
+        <div class="sw-field">
+          <label>Name</label>
+          <input class="sw-input" name="inv_name" placeholder="Inverter_1" required>
+        </div>
+        <div class="sw-field">
+          <label>IP address</label>
+          <input class="sw-input" name="inv_ip" placeholder="192.168.10.3" required>
+        </div>
+        <div class="sw-field">
+          <label>Dongle serial</label>
+          <input class="sw-input" name="dongle_serial" placeholder="2705000422">
+        </div>
+        <div class="sw-field">
+          <label>Inverter SN</label>
+          <input class="sw-input" name="inverter_sn" placeholder="2208262350">
+        </div>
+        <div>
+          <button class="sw-btn primary" type="submit" style="margin-top:1.25rem">Add</button>
+        </div>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- ── User access ── -->
+  <div class="sw-card">
+    <div class="sw-card-title">User access</div>
+    <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
+      Admins always see all sites. Assign <span class="sw-badge site-admin">site_admin</span> or
+      <span class="sw-badge site-viewer">site_viewer</span> users here.
+    </p>
+
+    {% if site_users %}
+    <div class="sw-table-wrap" style="margin-bottom:1rem">
+      <table class="sw-table">
+        <thead><tr><th>Username</th><th>Role</th><th></th></tr></thead>
+        <tbody>
+          {% for u in site_users %}
+          <tr>
+            <td class="mono" style="color:var(--solar)">{{ u.username }}</td>
+            <td><span class="sw-badge {{ u.role_name }}">{{ u.role_name }}</span></td>
+            <td style="text-align:right">
+              <form method="post" action="/sites/unassign">
+                <input type="hidden" name="user_id" value="{{ u.id }}">
+                <input type="hidden" name="site_id" value="{{ site.id }}">
+                <button class="sw-btn danger" style="font-size:.72rem;padding:4px 10px" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">No users assigned yet.</p>
+    {% endif %}
+
+    {% if available_users %}
+    <form method="post" action="/sites/assign" style="display:flex;gap:.5rem;align-items:center">
+      <input type="hidden" name="site_id" value="{{ site.id }}">
+      <select class="sw-select" name="user_id" style="max-width:280px;font-size:.85rem">
+        {% for u in available_users %}
+        <option value="{{ u.id }}">{{ u.username }} ({{ u.role_name }})</option>
+        {% endfor %}
+      </select>
+      <button class="sw-btn primary" type="submit">Assign</button>
+    </form>
+    {% endif %}
+  </div>
+
+
+  <!-- ── Share link ── -->
+  <div class="sw-card">
+    <div class="sw-card-title">Public share link</div>
+    <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
+      Generate a read-only share link for this site. Anyone with the link can
+      view the live dashboard — no login required. Regenerating immediately
+      revokes the old link.
+    </p>
+
+    {% if site.share_token %}
+    {% set share_url = request.url.scheme ~ "://" ~ request.headers.get("host", "your-domain") ~ "/share/" ~ site.share_token %}
+    <div style="background:var(--s2);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+      <span id="share-url-text" style="font-family:var(--mono);font-size:.78rem;color:var(--solar);word-break:break-all;flex:1">{{ share_url }}</span>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('share-url-text').textContent.trim()).then(function(){this.textContent='Copied!';var b=this;setTimeout(function(){b.textContent='Copy'},1500)}.bind(this))"
+              class="sw-btn" style="font-size:.72rem;padding:4px 12px;white-space:nowrap" type="button">Copy</button>
+      <a class="sw-btn dashboard" href="{{ share_url }}" target="_blank" rel="noopener"
+         style="font-size:.72rem;padding:4px 12px;white-space:nowrap">Preview ↗</a>
+    </div>
+    <p style="font-size:.75rem;color:var(--muted);margin-bottom:.75rem">
+      📱 This link can be installed as a PWA on phones and tablets — open it in Chrome or Safari and use "Add to Home Screen".
+    </p>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <form method="post" action="/sites/{{ site.id }}/token/generate">
+        <button class="sw-btn" style="font-size:.72rem;padding:4px 12px" type="submit">Regenerate link</button>
+      </form>
+      <form method="post" action="/sites/{{ site.id }}/token/revoke">
+        <button class="sw-btn danger" style="font-size:.72rem;padding:4px 12px" type="submit">Revoke link</button>
+      </form>
+    </div>
+    {% else %}
+    <form method="post" action="/sites/{{ site.id }}/token/generate">
+      <button class="sw-btn primary" type="submit">Generate share link</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <!-- ── Danger zone ── -->
+  <div class="sw-card danger-zone">
+    <div class="sw-danger-label">⚠ Danger zone</div>
+    <p class="sw-danger-hint">Deleting a site removes all user assignments. Solar readings and weather data are kept.</p>
+    <form method="post" action="/sites/{{ site.id }}/delete" class="sw-inline-action">
+      <input class="sw-input" name="admin_password" type="password" placeholder="Admin password to confirm" required>
+      <button class="sw-btn danger" type="submit">Delete site</button>
+    </form>
+  </div>
+
+  {% endif %}
+</div>
+
+<script>
+const sel = document.getElementById('source_type_select');
+if (sel) {
+  const sf = document.getElementById('sunsynk_fields');
+  sel.addEventListener('change', () => {
+    sf.style.display = sel.value === 'sunsynk' ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

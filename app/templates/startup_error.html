@@ -1,21 +1,24 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>Startup validation failed</title>
-  </head>
-  <body>
-    <main>
-      <h1>Startup validation failed</h1>
-      <p>
-        The application cannot start normally because one or more required
-        startup checks failed. Resolve the issues below and restart the app.
-      </p>
-      <ul>
-        {% for error in errors %}
-          <li>{{ error }}</li>
-        {% endfor %}
-      </ul>
-    </main>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0c10">
+  <link rel="icon" type="image/png" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/css/admin.css">
+  <title>SolarWatch — Startup failed</title>
+</head>
+<body>
+<div class="sw-error-page">
+  <div class="sw-error-card">
+    <h1>☀️ Startup validation failed</h1>
+    <p>The application cannot start normally because one or more required checks failed. Resolve the issues below and restart.</p>
+    <ul class="sw-error-list">
+      {% for error in errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+</body>
 </html>

@@ -73,8 +73,11 @@ async def login_post(
         _flash(request, "danger", "Invalid credentials.")
         return _render(request, "auth/login.html")
 
+    import time as _time
     request.session.clear()
     request.session["user_id"] = user["id"]
+    request.session["role"] = user["role_name"]
+    request.session["login_at"] = int(_time.time())
 
     if user.get("must_change_password"):
         _flash(request, "warning", "Please update your password to continue.")

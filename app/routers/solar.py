@@ -27,7 +27,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
-from app.auth import login_required
+from app.auth import login_required, get_accessible_sites, require_site_access
 from app.db import get_connection
 from app.routers.auth import _consume_flash
 
@@ -89,12 +89,17 @@ def _get_sites() -> list[dict]:
     return [{"name": r["site_name"], "display": r["display_name"]} for r in rows]
 
 
-def _resolve_site(site: Optional[str]) -> Optional[str]:
-    """Return validated site name, or first enabled site if none given."""
+def _resolve_site(site: Optional[str], accessible: list[str]) -> Optional[str]:
+    """Return validated site name from the user's accessible sites.
+
+    If site is given, verify it is in the user's accessible list.
+    If no site is given, return the first accessible site.
+    """
     if site:
-        return site
-    sites = _get_sites()
-    return sites[0]["name"] if sites else None
+        # Case-insensitive match
+        match = next((s for s in accessible if s.lower() == site.lower()), None)
+        return match  # None if not accessible — caller raises 400/403
+    return accessible[0] if accessible else None
 
 
 def _get_flow(site: str) -> dict:
@@ -555,44 +560,49 @@ async def dashboard(request: Request, user=Depends(login_required)):
 
 
 @router.get("/api/solar/sites")
-async def api_sites(_user=Depends(login_required)):
-    """List all enabled sites."""
-    return _get_sites()
+async def api_sites(user=Depends(login_required)):
+    """List enabled sites accessible to the current user."""
+    accessible = get_accessible_sites(user)
+    all_sites = _get_sites()
+    return [s for s in all_sites if s["name"] in accessible]
 
 
 @router.get("/api/solar/flow")
 async def api_flow(
     site: Optional[str] = Query(default=None),
-    _user=Depends(login_required),
+    user=Depends(login_required),
 ):
-    """Live power data for a site. Cached for 10 seconds."""
-    resolved = _resolve_site(site)
+    """Live power data for a site the user can access. Cached for 10 seconds."""
+    accessible = get_accessible_sites(user)
+    resolved = _resolve_site(site, accessible)
     if not resolved:
-        raise HTTPException(400, "No sites available")
+        raise HTTPException(400, "No accessible sites")
     return _get_flow(resolved)
 
 
 @router.get("/api/solar/weather")
 async def api_weather(
     site: Optional[str] = Query(default=None),
-    _user=Depends(login_required),
+    user=Depends(login_required),
 ):
-    """Latest weather reading for a site. Cached for 60 seconds."""
-    resolved = _resolve_site(site)
+    """Latest weather for an accessible site. Cached for 60 seconds."""
+    accessible = get_accessible_sites(user)
+    resolved = _resolve_site(site, accessible)
     if not resolved:
-        raise HTTPException(400, "No sites available")
+        raise HTTPException(400, "No accessible sites")
     return _get_weather(resolved)
 
 
 @router.get("/api/solar/monthly")
 async def api_monthly(
     site: Optional[str] = Query(default=None),
-    _user=Depends(login_required),
+    user=Depends(login_required),
 ):
-    """This month's PV kWh and grid kWh. Cached for 120 seconds."""
-    resolved = _resolve_site(site)
+    """This month's PV and grid kWh for an accessible site. Cached for 120 seconds."""
+    accessible = get_accessible_sites(user)
+    resolved = _resolve_site(site, accessible)
     if not resolved:
-        raise HTTPException(400, "No sites available")
+        raise HTTPException(400, "No accessible sites")
     return _get_monthly(resolved)
 
 
@@ -600,15 +610,16 @@ async def api_monthly(
 async def api_chart(
     chart: str,
     site: Optional[str] = Query(default=None),
-    _user=Depends(login_required),
+    user=Depends(login_required),
 ):
-    """Chart data for the advanced view. Cached for 60 seconds.
+    """Chart data for an accessible site. Cached for 60 seconds.
 
     chart types: pv, load, battery, grid, daily, temps, peaks
     """
-    resolved = _resolve_site(site)
+    accessible = get_accessible_sites(user)
+    resolved = _resolve_site(site, accessible)
     if not resolved:
-        raise HTTPException(400, "No sites available")
+        raise HTTPException(400, "No accessible sites")
     result = _get_chart(chart, resolved)
     if isinstance(result, dict) and "error" in result:
         raise HTTPException(404, result["error"])

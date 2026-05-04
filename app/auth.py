@@ -130,12 +130,29 @@ def _admin_password_matches(current_user: Dict[str, Any], password: str) -> bool
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     """Read the session and return the hydrated user, or None.
 
-    This runs on every request that injects it. The user is re-fetched from
-    the DB so that disabling an account or role takes effect immediately —
-    same behaviour as the Flask template's before_app_request hook.
+    Re-fetches from DB on every request so disabling an account takes effect
+    immediately. Enforces role-based session expiry:
+      - admin      → 8 hours  (short, high-privilege)
+      - all others → 30 days  (stay logged in for normal users)
     """
+    import time as _time
+    from app.config import get_config
+
     user_id = request.session.get("user_id")
     if not user_id:
+        return None
+
+    # Role-based session expiry check
+    config = get_config()
+    login_at = request.session.get("login_at", 0)
+    role = request.session.get("role", "user")
+    max_age = (
+        config.SESSION_MAX_AGE           # 8 hours for admin
+        if role == "admin"
+        else config.SESSION_MAX_AGE_USER  # 30 days for everyone else
+    )
+    if _time.time() - login_at > max_age:
+        request.session.clear()
         return None
 
     user = _fetch_user_by_id(int(user_id))
@@ -201,3 +218,54 @@ class _RedirectException(Exception):
 def _redirect(url: str) -> None:
     """Raise a redirect from inside a Depends() guard."""
     raise _RedirectException(url=url)
+
+
+# ---------------------------------------------------------------------------
+# Site access helpers — used by solar routes and the settings page
+# ---------------------------------------------------------------------------
+
+def _fetch_user_sites(user_id: int) -> list[str]:
+    """Return list of site_names the user is explicitly assigned to.
+
+    Admins bypass this — they always see all sites.
+    For site_admin and site_viewer, only assigned sites are returned.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT s.site_name
+                FROM user_sites us
+                JOIN sites s ON s.id = us.site_id
+                WHERE us.user_id = :user_id
+                AND s.enabled = TRUE
+                ORDER BY s.display_name
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings().all()
+    return [r["site_name"] for r in rows]
+
+
+def get_accessible_sites(user: dict) -> list[str]:
+    """Return the site_names this user can access.
+
+    - admin: all enabled sites (no restriction)
+    - site_admin / site_viewer / user: only their assigned sites
+    """
+    if user["role_name"] == "admin":
+        with get_connection() as conn:
+            rows = conn.execute(
+                text("SELECT site_name FROM sites WHERE enabled = TRUE ORDER BY display_name")
+            ).mappings().all()
+        return [r["site_name"] for r in rows]
+    return _fetch_user_sites(int(user["id"]))
+
+
+def require_site_access(site_name: str, user: dict) -> bool:
+    """Return True if the user can access the given site. Raise 403 otherwise."""
+    from fastapi import HTTPException
+    accessible = get_accessible_sites(user)
+    if site_name.lower() not in [s.lower() for s in accessible]:
+        raise HTTPException(403, f"You do not have access to site: {site_name}")
+    return True

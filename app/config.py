@@ -19,7 +19,8 @@ class BaseConfig:
 
     # Session cookie settings (used by Starlette's SessionMiddleware).
     SESSION_COOKIE_NAME: str = "session"
-    SESSION_MAX_AGE: int = 60 * 60 * 8  # 8 hours
+    SESSION_MAX_AGE: int = 60 * 60 * 8          # 8 hours — default (admin)
+    SESSION_MAX_AGE_USER: int = 60 * 60 * 24 * 30  # 30 days — regular users
 
     # Proxy fix: set APP_PROXY_FIX=true when running behind Nginx/Traefik/Cloudflare.
     PROXY_FIX: bool = field(

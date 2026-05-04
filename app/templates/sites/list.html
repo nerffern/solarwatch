@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %} — Sites{% endblock %}
+{% block content %}
+<div class="sw-page">
+  <div class="sw-page-header">
+    <div>
+      <h1 class="sw-page-title">Sites</h1>
+      <p class="sw-page-subtitle">Manage inverter sites and their collectors.</p>
+    </div>
+    <a class="sw-btn primary" href="/sites/new">+ Add site</a>
+  </div>
+
+  <div class="sw-card">
+    <div class="sw-table-wrap">
+      <table class="sw-table">
+        <thead>
+          <tr>
+            <th>Display name</th>
+            <th>Site name</th>
+            <th>Type</th>
+            <th>Location</th>
+            <th>Inverters</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for site in sites %}
+          <tr>
+            <td style="font-weight:700;color:var(--text)">{{ site.display_name }}</td>
+            <td><code>{{ site.site_name }}</code></td>
+            <td>
+              {% if site.source_type == 'deye' %}
+                <span class="sw-badge deye">Deye</span>
+              {% else %}
+                <span class="sw-badge sunsynk">Sunsynk</span>
+              {% endif %}
+            </td>
+            <td style="color:var(--muted);font-size:.85rem">{{ site.location or '—' }}</td>
+            <td style="color:var(--muted);font-size:.85rem">
+              {% if site.source_type == 'deye' and site.inverters %}
+                {{ site.inverters | length }} inverter{{ 's' if site.inverters | length != 1 }}
+              {% elif site.source_type == 'sunsynk' %}
+                Cloud API
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% if site.enabled %}
+                <span class="sw-badge enabled">Enabled</span>
+              {% else %}
+                <span class="sw-badge disabled">Disabled</span>
+              {% endif %}
+            </td>
+            <td>
+              <div style="display:flex;gap:.4rem;align-items:center">
+                <a class="sw-btn" style="font-size:.72rem;padding:4px 12px" href="/sites/{{ site.id }}/edit">Edit</a>
+                <form method="post" action="/sites/{{ site.id }}/toggle">
+                  <button class="sw-btn ghost" style="font-size:.72rem;padding:4px 12px" type="submit">
+                    {% if site.enabled %}Disable{% else %}Enable{% endif %}
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr class="empty-row"><td colspan="7">No sites configured. <a href="/sites/new" style="color:var(--solar)">Add one →</a></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

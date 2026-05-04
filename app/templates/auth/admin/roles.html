@@ -1,82 +1,95 @@
 {% extends "base.html" %}
-
+{% block title %} — Roles{% endblock %}
 {% block content %}
-  <main class="container py-5">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <h1 class="h3">Role management</h1>
-      <a class="btn btn-outline-secondary btn-sm" href="/auth/admin">Back to admin</a>
+<div class="sw-page">
+  <div class="sw-page-header">
+    <div>
+      <h1 class="sw-page-title">Role management</h1>
+      <p class="sw-page-subtitle">Create and manage permission roles.</p>
     </div>
+    <a class="sw-btn ghost" href="/auth/admin">← Admin</a>
+  </div>
 
-    <section class="mb-5">
-      <h2 class="h5 mb-3">Create role</h2>
-      <form method="post" action="/auth/admin/roles/create" class="card card-body shadow-sm">
-        <div class="row g-3">
-          <div class="col-md-4">
-            <label class="form-label">Name</label>
-            <input class="form-control" name="name" required>
-          </div>
-          <div class="col-md-8">
-            <label class="form-label">Description</label>
-            <input class="form-control" name="description">
-          </div>
+  <!-- Create role -->
+  <div class="sw-card">
+    <div class="sw-card-title">Create role</div>
+    <form method="post" action="/auth/admin/roles/create">
+      <div class="sw-form-row cols-2">
+        <div class="sw-field">
+          <label>Name</label>
+          <input class="sw-input" name="name" placeholder="e.g. viewer" required>
         </div>
-        <button class="btn btn-primary mt-3" type="submit">Create role</button>
-      </form>
-    </section>
-
-    <section>
-      <h2 class="h5 mb-3">Existing roles</h2>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Description</th>
-              <th>Status</th>
-              <th>System</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for role in roles %}
-              <tr>
-                <td>{{ role.name }}</td>
-                <td>
-                  <form method="post" action="/auth/admin/roles/{{ role.id }}/edit">
-                    <input class="form-control form-control-sm" name="description" value="{{ role.description or '' }}">
-                    <button class="btn btn-link btn-sm px-0" type="submit">Update description</button>
-                  </form>
-                </td>
-                <td>
-                  {% if role.enabled %}
-                    <span class="badge bg-success">Enabled</span>
-                  {% else %}
-                    <span class="badge bg-secondary">Disabled</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if role.is_system %}
-                    <span class="badge bg-info">System</span>
-                  {% else %}
-                    <span class="badge bg-light text-dark">Custom</span>
-                  {% endif %}
-                </td>
-                <td>
-                  <form method="post" action="/auth/admin/roles/{{ role.id }}/toggle" class="mb-2">
-                    <button class="btn btn-outline-secondary btn-sm" type="submit">
-                      {% if role.enabled %}Disable{% else %}Enable{% endif %}
-                    </button>
-                  </form>
-                  <form method="post" action="/auth/admin/roles/{{ role.id }}/delete" class="d-flex gap-1">
-                    <input class="form-control form-control-sm" style="width: 180px;" name="admin_password" type="password" placeholder="Admin password to confirm" required>
-                    <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
-                  </form>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+        <div class="sw-field">
+          <label>Description</label>
+          <input class="sw-input" name="description" placeholder="Short description">
+        </div>
       </div>
-    </section>
-  </main>
+      <button class="sw-btn primary" style="margin-top:.5rem" type="submit">Create role</button>
+    </form>
+  </div>
+
+  <!-- Roles table -->
+  <div class="sw-card">
+    <div class="sw-card-title">Existing roles</div>
+    <div class="sw-table-wrap">
+      <table class="sw-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th>Type</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in roles %}
+          <tr>
+            <td>
+              <span class="sw-badge {{ role.name }}">{{ role.name }}</span>
+            </td>
+            <td>
+              <form method="post" action="/auth/admin/roles/{{ role.id }}/edit" style="display:flex;align-items:center;gap:.4rem">
+                <input class="sw-input" name="description" value="{{ role.description or '' }}" style="font-size:.82rem;padding:.3rem .6rem">
+                <button class="sw-btn" style="font-size:.7rem;padding:4px 10px;white-space:nowrap" type="submit">Save</button>
+              </form>
+            </td>
+            <td>
+              {% if role.enabled %}
+                <span class="sw-badge enabled">Enabled</span>
+              {% else %}
+                <span class="sw-badge disabled">Disabled</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if role.is_system %}
+                <span class="sw-badge system">System</span>
+              {% else %}
+                <span class="sw-badge custom">Custom</span>
+              {% endif %}
+            </td>
+            <td>
+              <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
+                <form method="post" action="/auth/admin/roles/{{ role.id }}/toggle">
+                  <button class="sw-btn" style="font-size:.72rem;padding:4px 10px" type="submit"
+                          {% if role.is_system %}disabled title="System roles cannot be toggled"{% endif %}>
+                    {% if role.enabled %}Disable{% else %}Enable{% endif %}
+                  </button>
+                </form>
+                <form method="post" action="/auth/admin/roles/{{ role.id }}/delete" class="sw-inline-action">
+                  <input class="sw-input" name="admin_password" type="password" placeholder="Admin password" required>
+                  <button class="sw-btn danger" style="font-size:.72rem;padding:4px 10px" type="submit"
+                          {% if role.is_system %}disabled title="System roles cannot be deleted"{% endif %}>Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr class="empty-row"><td colspan="5">No roles yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}
