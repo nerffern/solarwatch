@@ -24,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_config
 from app.db import dispose_engine
-from app.routers import api, auth, main
+from app.routers import api, auth, main, solar
 from app.startup import run_startup_checks
 from app.auth import _RedirectException
 
@@ -85,7 +85,7 @@ def create_app() -> FastAPI:
         LOGGER.info("Database engine disposed.")
 
     app = FastAPI(
-        title="FastAPI SaaS Template",
+        title="SolarWatch",
         docs_url="/api/docs" if getattr(config, "DEBUG", False) else None,
         redoc_url="/api/redoc" if getattr(config, "DEBUG", False) else None,
         lifespan=lifespan,
@@ -164,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(main.router)
     app.include_router(auth.router)
     app.include_router(api.router)
+    app.include_router(solar.router)
 
     # ---------------------------------------------------------------------------
     # Exception handler for redirects raised inside Depends() guards.

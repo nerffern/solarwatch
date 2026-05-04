@@ -1,4 +1,4 @@
-"""Route modules for the FastAPI SaaS template."""
-from app.routers import api, auth, main
+"""Route modules for SolarWatch."""
+from app.routers import api, auth, main, solar
 
-__all__ = ["auth", "main", "api"]
+__all__ = ["auth", "main", "api", "solar"]

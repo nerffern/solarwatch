@@ -36,3 +36,8 @@ slowapi>=0.1.9,<1.0
 
 #Jinja2
 jinja2>=3.1,<4.0
+# SolarWatch collector dependencies (for running collector.py on the same host)
+pysolarmanv5>=2.4.0
+requests>=2.31.0
+pycryptodome>=3.19.0
+tzdata>=2024.1

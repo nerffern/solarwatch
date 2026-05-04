@@ -219,12 +219,46 @@ def _ensure_admin_user() -> List[str]:
     return []
 
 
+
+
+def _verify_solarwatch_tables() -> List[str]:
+    """Verify the SolarWatch data tables exist.
+
+    These tables are created by setup.sql, not by this app. If they are
+    missing it means the database has not been initialised yet.
+    Returns errors (blocking startup) so the admin sees a clear message
+    rather than a confusing 500 error on the first dashboard load.
+    """
+    required = ["sites", "solar_readings", "weather_readings"]
+    missing = []
+    try:
+        with get_connection() as conn:
+            for table in required:
+                result = conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.tables "
+                        "WHERE table_schema = 'public' AND table_name = :t"
+                    ),
+                    {"t": table},
+                ).fetchone()
+                if not result:
+                    missing.append(table)
+    except Exception as exc:
+        return [f"Could not verify SolarWatch tables: {exc}"]
+    if missing:
+        return [
+            f"SolarWatch tables not found: {', '.join(missing)}. "
+            "Run setup.sql against the database to initialise the schema."
+        ]
+    return []
+
 STARTUP_STEPS: List[StartupStep] = [
     StartupStep("Validate required environment variables", _validate_required_env_vars),
     StartupStep("Verify database connectivity", _verify_database_connectivity),
     StartupStep("Ensure foundational tables exist", _ensure_foundational_tables),
     StartupStep("Ensure system roles exist", _ensure_system_roles),
     StartupStep("Ensure admin user exists", _ensure_admin_user),
+    StartupStep("Verify SolarWatch data tables", _verify_solarwatch_tables),
 ]
 
 
