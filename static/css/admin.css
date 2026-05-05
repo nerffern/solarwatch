@@ -299,6 +299,8 @@ html, body {
 .sw-badge.disabled { background: rgba(128,144,184,.1);  color: var(--muted); border: 1px solid rgba(128,144,184,.2); }
 .sw-badge.deye     { background: rgba(245,166,35,.15);  color: var(--solar); border: 1px solid rgba(245,166,35,.3);  }
 .sw-badge.sunsynk  { background: rgba(79,195,247,.12);  color: var(--info);  border: 1px solid rgba(79,195,247,.3);  }
+.sw-badge.victron  { background: rgba(46,204,113,.12);  color: var(--green); border: 1px solid rgba(46,204,113,.3);  }
+.sw-badge.sungrow  { background: rgba(128,144,184,.1);  color: var(--muted); border: 1px solid rgba(128,144,184,.2); }
 .sw-badge.system   { background: rgba(79,195,247,.12);  color: var(--info);  border: 1px solid rgba(79,195,247,.3);  }
 .sw-badge.custom   { background: rgba(128,144,184,.1);  color: var(--muted); border: 1px solid rgba(128,144,184,.2); }
 .sw-badge.admin    { background: rgba(245,166,35,.15);  color: var(--solar); border: 1px solid rgba(245,166,35,.3);  }

@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS sites (
     id                  SERIAL      PRIMARY KEY,
     site_name           TEXT        NOT NULL UNIQUE,
     display_name        TEXT        NOT NULL,
-    source_type         TEXT        NOT NULL CHECK (source_type IN ('deye', 'sunsynk')),
+    source_type         TEXT        NOT NULL CHECK (source_type IN ('deye', 'sunsynk', 'victron', 'sungrow')),
     enabled             BOOLEAN     NOT NULL DEFAULT TRUE,
     location            TEXT,
     latitude            NUMERIC(9,6),          -- decimal degrees, e.g. -24.052200

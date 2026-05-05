@@ -41,3 +41,6 @@ pysolarmanv5>=2.4.0
 requests>=2.31.0
 pycryptodome>=3.19.0
 tzdata>=2024.1
+
+# Victron MQTT collector
+paho-mqtt>=1.6.1

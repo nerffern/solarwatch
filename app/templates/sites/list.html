@@ -32,16 +32,22 @@
             <td>
               {% if site.source_type == 'deye' %}
                 <span class="sw-badge deye">Deye</span>
-              {% else %}
+              {% elif site.source_type == 'sunsynk' %}
                 <span class="sw-badge sunsynk">Sunsynk</span>
+              {% elif site.source_type == 'victron' %}
+                <span class="sw-badge victron">Victron</span>
+              {% else %}
+                <span class="sw-badge disabled">{{ site.source_type }}</span>
               {% endif %}
             </td>
             <td style="color:var(--muted);font-size:.85rem">{{ site.location or '—' }}</td>
             <td style="color:var(--muted);font-size:.85rem">
-              {% if site.source_type == 'deye' and site.inverters %}
-                {{ site.inverters | length }} inverter{{ 's' if site.inverters | length != 1 }}
+              {% if site.source_type in ('deye', 'victron', 'sungrow') and site.inverters %}
+                {{ site.inverters | length }} device{{ 's' if site.inverters | length != 1 }}
+              {% elif site.source_type in ('deye', 'victron', 'sungrow') %}
+                None configured
               {% elif site.source_type == 'sunsynk' %}
-                Cloud API
+                {% if site.sunsynk_plant_id %}1 plant{% else %}Cloud API{% endif %}
               {% else %}
                 —
               {% endif %}

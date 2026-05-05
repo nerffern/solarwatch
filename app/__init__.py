@@ -32,7 +32,6 @@ from app.auth import _RedirectException
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _load_dotenv_if_available() -> bool:
@@ -161,7 +160,8 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def startup_guard(request: Request, call_next):
         if startup_errors and request.url.path != "/health":
-            return templates.TemplateResponse(
+            from app.templates_global import templates as _t
+            return _t.TemplateResponse(
                 "startup_error.html",
                 {"request": request, "errors": startup_errors},
                 status_code=503,
@@ -188,10 +188,10 @@ def create_app() -> FastAPI:
     async def redirect_exception_handler(request: Request, exc: _RedirectException):
         return RedirectResponse(url=exc.url, status_code=exc.status_code)
 
-    # Inject APP_VERSION into all Jinja2 template contexts automatically
-    from fastapi.templating import Jinja2Templates as _J2T
-    _j2 = _J2T(directory="app/templates")
-    _j2.env.globals["APP_VERSION"] = APP_VERSION
+    # APP_VERSION is injected at import time in app/templates_global.py
+    # Update it here in case create_app() is called with a different working dir
+    from app.templates_global import templates as _shared_templates
+    _shared_templates.env.globals["APP_VERSION"] = APP_VERSION
 
     # Static files
     app.mount("/static", StaticFiles(directory="static"), name="static")

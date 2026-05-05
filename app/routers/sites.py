@@ -28,7 +28,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from app.auth import _admin_password_matches, login_required, require_role
@@ -37,7 +36,7 @@ from app.routers.auth import _consume_flash
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/sites", tags=["sites"])
-templates = Jinja2Templates(directory="app/templates")
+from app.templates_global import templates
 
 
 def _flash(request: Request, category: str, message: str) -> None:
@@ -174,8 +173,8 @@ async def sites_new_post(
         _flash(request, "danger", "Site name and display name are required.")
         return RedirectResponse(url="/sites/new", status_code=303)
 
-    if source_type not in ("deye", "sunsynk"):
-        _flash(request, "danger", "Source type must be deye or sunsynk.")
+    if source_type not in ("deye", "sunsynk", "victron", "sungrow"):
+        _flash(request, "danger", "Source type must be deye, sunsynk, victron, or sungrow.")
         return RedirectResponse(url="/sites/new", status_code=303)
 
     lat = float(latitude) if latitude.strip() else None
@@ -197,7 +196,7 @@ async def sites_new_post(
                                        location, latitude, longitude, enabled, inverters)
                     VALUES (:site_name, :display_name, :source_type,
                             :location, :latitude, :longitude, :enabled,
-                            :inverters::jsonb)
+                            CAST(:inverters AS jsonb))
                     RETURNING id
                     """
                 ),
@@ -209,7 +208,7 @@ async def sites_new_post(
                     "latitude": lat,
                     "longitude": lon,
                     "enabled": enabled == "on",
-                    "inverters": "[]" if source_type == "deye" else None,
+                    "inverters": "[]" if source_type in ("deye", "victron", "sungrow") else None,
                 },
             )
             new_id = result.fetchone()[0]
@@ -427,8 +426,8 @@ async def inverters_add(
     inverter_sn: str = Form(""),
 ):
     site = _fetch_site(site_id)
-    if not site or site["source_type"] != "deye":
-        _flash(request, "danger", "Site not found or not a Deye site.")
+    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
+        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     if not inv_name.strip() or not inv_ip.strip():
@@ -438,16 +437,21 @@ async def inverters_add(
     try:
         raw = site["inverters"]
         inverters = raw if isinstance(raw, list) else (json.loads(raw) if raw else [])
-        inverters.append({
-            "name": inv_name.strip(),
-            "ip": inv_ip.strip(),
-            "dongle_serial": int(dongle_serial) if dongle_serial.strip() else 0,
-            "inverter_sn": inverter_sn.strip(),
-        })
+        inv_entry = {"name": inv_name.strip()}
+        if site["source_type"] == "victron":
+            # Victron: inv_ip field holds the Cerbo GX MQTT host
+            inv_entry["mqtt_host"] = inv_ip.strip()
+            inv_entry["mqtt_port"] = 1883
+        else:
+            # Deye / Sungrow: standard Modbus fields
+            inv_entry["ip"] = inv_ip.strip()
+            inv_entry["dongle_serial"] = int(dongle_serial) if dongle_serial.strip() else 0
+            inv_entry["inverter_sn"] = inverter_sn.strip()
+        inverters.append(inv_entry)
         with get_connection() as conn:
             conn.execute(
                 text(
-                    "UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"
+                    "UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"
                 ),
                 {"inv": json.dumps(inverters), "id": site_id},
             )
@@ -455,7 +459,8 @@ async def inverters_add(
         _flash(request, "danger", f"Failed to add inverter: {e}")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
-    _flash(request, "success", f"Inverter '{inv_name}' added.")
+    label = 'Cerbo GX' if site['source_type'] == 'victron' else 'Inverter'
+    _flash(request, "success", f"{label} '{inv_name}' added.")
     return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
 
@@ -472,8 +477,8 @@ async def inverters_delete(
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     site = _fetch_site(site_id)
-    if not site or site["source_type"] != "deye":
-        _flash(request, "danger", "Site not found or not a Deye site.")
+    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
+        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     try:
@@ -487,7 +492,7 @@ async def inverters_delete(
         with get_connection() as conn:
             conn.execute(
                 text(
-                    "UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"
+                    "UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"
                 ),
                 {"inv": json.dumps(inverters), "id": site_id},
             )

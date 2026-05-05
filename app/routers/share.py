@@ -40,7 +40,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from app.auth import require_role
@@ -57,7 +56,7 @@ from app.routers.solar import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["share"])
-templates = Jinja2Templates(directory="app/templates")
+from app.templates_global import templates
 
 # Rate limit for public share endpoints — more generous than login but
 # still protects against scraping. Separate from authenticated limits.

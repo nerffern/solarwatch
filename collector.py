@@ -266,6 +266,7 @@ def write_weather(data: dict):
 # ── DEYE POLLING ──────────────────────────────────────────────────────────────
 
 import deye_worker
+import victron_worker
 
 
 def poll_deye_inverter_with_retry(inv: dict, site_name: str) -> Optional[dict]:
@@ -357,12 +358,48 @@ def poll_sunsynk_sites(sites: list[dict]):
 # (same keys as deye_worker.poll() returns).
 
 def poll_victron_sites(sites: list[dict]):
-    """Poll Victron inverter sites — placeholder, implementation pending."""
+    """Poll Victron sites via MQTT (Cerbo GX / CCGX direct connection).
+
+    Each Victron site has one Cerbo GX that aggregates all MPPTs and battery
+    monitors. One MQTT connection per site → one row in solar_readings per poll.
+
+    The inverter config in sites.inverters should have exactly one entry:
+      [{"name": "Victron_1", "mqtt_host": "10.0.1.80", "mqtt_port": 1883}]
+
+    If inverters is empty, falls back to VICTRON_MQTT_HOST env var.
+    """
     for site in sites:
-        log.warning(
-            f"[{site['site_name']}] Victron polling not yet implemented. "
-            f"Add victron_worker.py and wire it here when inverter details are available."
-        )
+        if not running:
+            return
+        site_name = site["site_name"]
+        inverters = site.get("inverters") or []
+
+        # Use first inverter config, or build one from env var
+        if inverters:
+            inv = inverters[0]
+        else:
+            inv = {
+                "name":      "Victron",
+                "mqtt_host": os.getenv("VICTRON_MQTT_HOST", ""),
+            }
+
+        inv_name = inv.get("name", "Victron")
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            data = victron_worker.poll(inv, site_name)
+            if data is not None:
+                # Use inv_name as both inverter_name and inverter_sn
+                # (Victron sites have one logical inverter per Cerbo GX)
+                write_reading(site_name, inv_name, inv_name, data)
+                break
+            if attempt < MAX_RETRIES:
+                log.warning(
+                    f"[{site_name}/{inv_name}] "
+                    f"Retry {attempt}/{MAX_RETRIES} in {RETRY_DELAY}s..."
+                )
+                time.sleep(RETRY_DELAY)
+        else:
+            log.error(f"[{site_name}/{inv_name}] All {MAX_RETRIES} attempts failed")
 
 
 # ── SUNGROW POLLING ───────────────────────────────────────────────────────────

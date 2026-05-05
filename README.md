@@ -152,7 +152,7 @@ Go to **Sites** (admin) and verify your sites are configured correctly:
 ### 9. Start the collector
 
 ```bash
-# Edit .env (or environment) to set PG_HOST, PG_USER, PG_PASS, PG_DB
+# Collector uses same DATABASE_URL or DB_* vars as the web app
 python collector.py
 ```
 
@@ -188,14 +188,18 @@ Config changes in the web UI are picked up on the next config reload (every 5 mi
 | `APP_ADMIN_RESET_PASSWORD` | No | `false` | Temporarily set `true` to reset admin password |
 | `RATE_LIMIT_LOGIN` | No | `10/minute` | Login attempts per IP |
 | `RATE_LIMIT_DEFAULT` | No | `60/minute` | Default API rate limit |
-| `PG_HOST` | — | — | Collector DB host |
-| `PG_PORT` | — | `5432` | |
-| `PG_DB` | — | `solarwatch` | |
-| `PG_USER` | — | `solarwatch_user` | |
-| `PG_PASS` | — | — | |
-| `POLL_INTERVAL` | — | `60` | Collector poll interval (seconds) |
-| `WEATHER_INTERVAL` | — | `900` | Weather poll interval (seconds) |
-| `CONFIG_RELOAD` | — | `300` | How often collector reloads site config (seconds) |
+| `POLL_INTERVAL` | — | `60` | Collector poll interval in seconds |
+| `MAX_RETRIES` | — | `3` | Retries per inverter per cycle |
+| `RETRY_DELAY` | — | `5` | Seconds between retries |
+| `CONFIG_RELOAD` | — | `300` | Seconds between site config reloads from DB |
+| `WEATHER_INTERVAL` | — | `900` | Weather poll interval in seconds (15 min) |
+| `VICTRON_MQTT_HOST` | — | — | Cerbo GX IP address for Victron sites (fallback if not set in inverter config) |
+| `VICTRON_MQTT_PORT` | — | `1883` | Victron MQTT broker port |
+
+> **Note:** The collector uses the same `DATABASE_URL` or `DB_*` variables as
+> the web app. There are no separate `PG_*` variables — one `.env` file covers both.
+> The simplest setup is to set `DATABASE_URL` once and both processes use it.
+
 
 ---
 
@@ -203,7 +207,7 @@ Config changes in the web UI are picked up on the next config reload (every 5 mi
 
 | Table | Owner | Created by | Notes |
 |---|---|---|---|
-| `sites` | postgres | `setup.sql` | Inverter site configuration |
+| `sites` | postgres | `setup.sql` | Inverter site config (deye/sunsynk/victron/sungrow) |
 | `solar_readings` | postgres | `setup.sql` | Time-series inverter data |
 | `weather_readings` | postgres | `weather_readings` | Open-Meteo weather data |
 | `roles` | solarwatch_user | App startup | Permission roles |
@@ -617,6 +621,40 @@ The collector reloads site configuration from the database every 5 minutes
 (`CONFIG_RELOAD=300`). Changes made via the web UI (adding inverters, updating
 credentials, enabling/disabling sites) are picked up automatically — no restart
 required.
+
+**Supported inverter types:**
+
+| Type | Protocol | Collector notes |
+|---|---|---|
+| `deye` | Solarman V5 Modbus over WAN | Direct IP to dongle, no cloud |
+| `sunsynk` | REST API at api.sunsynk.net | Cloud — needs username/password/plant ID |
+| `victron` | MQTT via Cerbo GX / CCGX | Direct local network — no VRM cloud needed |
+| `sungrow` | Placeholder | Worker pending — site disabled until added |
+
+**All inverter types store data in the same `solar_readings` table and are
+displayed identically on the dashboard.** The collector fills the fields that
+each inverter type provides; fields not available from that source are stored
+as `NULL` (the dashboard handles them gracefully).
+
+**Victron MQTT configuration:**
+
+Victron sites connect to the Cerbo GX MQTT broker directly over the local
+network. No VRM cloud account or API key needed. The Cerbo GX must be on the
+same network as the collector pod/server.
+
+Configure a Victron site via the web UI:
+1. Sites → Add site → source type: **Victron — MQTT (Cerbo GX / CCGX)**
+2. Add one inverter entry in the Inverters section:
+   - Name: `Victron_1` (or any label)
+   - IP address: Cerbo GX local IP (e.g. `10.0.1.80`)
+   - Dongle serial: leave blank
+   - Inverter SN: leave blank
+3. Set latitude/longitude so weather data is collected
+4. The collector connects via MQTT, sends a keepalive to flush all topics,
+   and collects power, battery, grid, and solar data within ~10 seconds per cycle.
+
+Multiple MPPT chargers are handled automatically — power is summed across all
+solar chargers, and daily yield is totalled across all devices.
 
 ---
 

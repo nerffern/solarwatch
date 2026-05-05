@@ -67,23 +67,39 @@
   </div>
 
   <!-- ── Inverters (Deye only) ── -->
-  {% if site.source_type == 'deye' %}
+  {% if site.source_type in ('deye', 'victron', 'sungrow') %}
   <div class="sw-card">
-    <div class="sw-card-title">Inverters</div>
+    {% if site.source_type == 'victron' %}
+      <div class="sw-card-title">Victron device — Cerbo GX / CCGX</div>
+      <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
+        Add one entry with the Cerbo GX local IP address. Leave serial fields blank.
+      </p>
+    {% else %}
+      <div class="sw-card-title">Inverters</div>
+    {% endif %}
 
     {% if inverters %}
     <div class="sw-table-wrap" style="margin-bottom:1rem">
       <table class="sw-table">
         <thead>
-          <tr><th>Name</th><th>IP address</th><th>Dongle serial</th><th>Inverter SN</th><th></th></tr>
+          <tr>
+            <th>Name</th>
+            <th>{% if site.source_type == 'victron' %}Cerbo GX IP{% else %}IP address{% endif %}</th>
+            {% if site.source_type == 'deye' %}<th>Dongle serial</th><th>Inverter SN</th>{% endif %}
+            <th></th>
+          </tr>
         </thead>
         <tbody>
           {% for inv in inverters %}
           <tr>
             <td><code>{{ inv.name }}</code></td>
-            <td class="mono" style="color:var(--info)">{{ inv.ip }}</td>
+            <td class="mono" style="color:var(--info)">
+              {{ inv.mqtt_host if site.source_type == 'victron' else inv.ip }}
+            </td>
+            {% if site.source_type == 'deye' %}
             <td class="mono" style="color:var(--muted);font-size:.8rem">{{ inv.dongle_serial }}</td>
             <td class="mono" style="color:var(--muted);font-size:.8rem">{{ inv.inverter_sn }}</td>
+            {% endif %}
             <td style="text-align:right">
               <form method="post" action="/my-sites/{{ site.id }}/inverters/{{ loop.index0 }}/delete">
                 <button class="sw-btn danger" style="font-size:.72rem;padding:4px 10px" type="submit"
@@ -96,12 +112,23 @@
       </table>
     </div>
     {% else %}
-    <p style="color:var(--muted);font-size:.875rem;margin-bottom:1rem">No inverters configured yet.</p>
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:1rem">No devices configured yet.</p>
     {% endif %}
 
     <hr class="sw-divider">
-    <div class="sw-section-label">Add inverter</div>
+    <div class="sw-section-label">{% if site.source_type == 'victron' %}Add Cerbo GX{% else %}Add inverter{% endif %}</div>
     <form method="post" action="/my-sites/{{ site.id }}/inverters/add">
+      {% if site.source_type == 'victron' %}
+      <div class="sw-form-row" style="grid-template-columns:2fr 3fr auto;gap:.5rem;align-items:end">
+        <div class="sw-field"><label>Name</label><input class="sw-input" name="inv_name" placeholder="Victron_1" required></div>
+        <div class="sw-field">
+          <label>Cerbo GX IP address <span class="req">*</span></label>
+          <input class="sw-input" name="inv_ip" placeholder="10.0.1.80" required>
+          <div class="sw-field-hint">Local network IP. MQTT port 1883 is used by default.</div>
+        </div>
+        <div><button class="sw-btn primary" type="submit" style="margin-top:1.25rem">Add</button></div>
+      </div>
+      {% else %}
       <div class="sw-form-row" style="grid-template-columns:2fr 2fr 1.5fr 1.5fr auto;gap:.5rem;align-items:end">
         <div class="sw-field"><label>Name</label><input class="sw-input" name="inv_name" placeholder="Inverter_1" required></div>
         <div class="sw-field"><label>IP address</label><input class="sw-input" name="inv_ip" placeholder="192.168.10.3" required></div>
@@ -109,6 +136,7 @@
         <div class="sw-field"><label>Inverter SN</label><input class="sw-input" name="inverter_sn" placeholder="2208262350"></div>
         <div><button class="sw-btn primary" type="submit" style="margin-top:1.25rem">Add</button></div>
       </div>
+      {% endif %}
     </form>
   </div>
   {% endif %}

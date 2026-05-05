@@ -249,6 +249,49 @@ def _ensure_admin_user() -> List[str]:
 
 
 
+def _verify_source_type_constraint() -> List[str]:
+    """Verify the sites.source_type CHECK constraint includes victron and sungrow.
+
+    Existing databases created before Victron support was added have:
+      CHECK (source_type IN ('deye', 'sunsynk'))
+
+    Adding a Victron site with the old constraint causes a DB error.
+    Run migrate_victron.sql as postgres to fix it.
+    """
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT pg_get_constraintdef(oid) AS def
+                    FROM   pg_constraint
+                    WHERE  conrelid = 'sites'::regclass
+                    AND    conname  = 'sites_source_type_check'
+                    """
+                )
+            ).mappings().first()
+
+            if not row:
+                # No constraint at all — fine, no restriction
+                return []
+
+            definition = row["def"]
+            missing = [t for t in ("victron", "sungrow") if t not in definition]
+            if missing:
+                return [
+                    f"sites.source_type CHECK constraint is outdated — "
+                    f"missing: {missing}. "
+                    f"Run migrate_victron.sql as the postgres superuser to add "
+                    f"Victron and Sungrow support: "
+                    f"psql -U postgres -d solarwatch -f migrate_victron.sql"
+                ]
+            return []
+    except Exception as exc:
+        # Non-fatal — don't block startup over a constraint check
+        return []
+
+
+
 def _verify_solarwatch_tables() -> List[str]:
     """Verify the SolarWatch data tables exist.
 
@@ -325,6 +368,7 @@ STARTUP_STEPS: List[StartupStep] = [
     StartupStep("Ensure system roles exist", _ensure_system_roles),
     StartupStep("Ensure admin user exists", _ensure_admin_user),
     StartupStep("Verify SolarWatch data tables", _verify_solarwatch_tables),
+    StartupStep("Verify source_type constraint", _verify_source_type_constraint),
     StartupStep("Check performance indexes", _check_performance_indexes),
 ]
 

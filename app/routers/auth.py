@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -27,7 +26,7 @@ from app.auth import (
 from app.db import get_connection
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-templates = Jinja2Templates(directory="app/templates")
+from app.templates_global import templates
 
 
 def _flash(request: Request, category: str, message: str) -> None:

@@ -24,7 +24,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from app.auth import get_accessible_sites, login_required, require_role
@@ -34,7 +33,7 @@ from app.routers.auth import _consume_flash
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/my-sites", tags=["my-sites"])
-templates = Jinja2Templates(directory="app/templates")
+from app.templates_global import templates
 
 # Roles that can access this page
 _SITE_ADMIN_ROLES = {"site_admin"}
@@ -247,8 +246,8 @@ async def my_inverters_add(
 ):
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
-    if not site or site["source_type"] != "deye":
-        _flash(request, "danger", "Site not found or not a Deye site.")
+    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
+        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
         return RedirectResponse(url=f"/my-sites/{site_id}/edit", status_code=303)
 
     if not inv_name.strip() or not inv_ip.strip():
@@ -258,15 +257,18 @@ async def my_inverters_add(
     try:
         raw = site["inverters"]
         inverters = raw if isinstance(raw, list) else (json.loads(raw) if raw else [])
-        inverters.append({
-            "name": inv_name.strip(),
-            "ip": inv_ip.strip(),
-            "dongle_serial": int(dongle_serial) if dongle_serial.strip() else 0,
-            "inverter_sn": inverter_sn.strip(),
-        })
+        inv_entry = {"name": inv_name.strip()}
+        if site["source_type"] == "victron":
+            inv_entry["mqtt_host"] = inv_ip.strip()
+            inv_entry["mqtt_port"] = 1883
+        else:
+            inv_entry["ip"] = inv_ip.strip()
+            inv_entry["dongle_serial"] = int(dongle_serial) if dongle_serial.strip() else 0
+            inv_entry["inverter_sn"] = inverter_sn.strip()
+        inverters.append(inv_entry)
         with get_connection() as conn:
             conn.execute(
-                text("UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"),
+                text("UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"),
                 {"inv": json.dumps(inverters), "id": site_id},
             )
     except Exception as e:
@@ -285,8 +287,8 @@ async def my_inverters_delete(
 ):
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
-    if not site or site["source_type"] != "deye":
-        _flash(request, "danger", "Site not found or not a Deye site.")
+    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
+        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
         return RedirectResponse(url=f"/my-sites/{site_id}/edit", status_code=303)
 
     try:
@@ -296,7 +298,7 @@ async def my_inverters_delete(
             removed = inverters.pop(inv_idx)
             with get_connection() as conn:
                 conn.execute(
-                    text("UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"),
+                    text("UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"),
                     {"inv": json.dumps(inverters), "id": site_id},
                 )
             _flash(request, "success", f"Inverter '{removed.get('name', '')}' removed.")

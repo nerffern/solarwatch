@@ -24,7 +24,6 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from app.auth import login_required, get_accessible_sites, require_site_access
@@ -34,7 +33,7 @@ from app.routers.auth import _consume_flash
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["solar"])
-templates = Jinja2Templates(directory="app/templates")
+from app.templates_global import templates
 
 # ---------------------------------------------------------------------------
 # TTL cache — identical to powerflow_server.py
