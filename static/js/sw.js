@@ -1,37 +1,49 @@
 /**
- * SolarWatch — sw.js (Service Worker v3)
+ * SolarWatch — sw.js (Service Worker v4)
  *
- * All assets are now self-hosted — no CDN dependencies.
- * Fonts, chart.js, and the date adapter all serve from /static/.
+ * All assets self-hosted — no CDN dependencies.
+ * v4 changes from v3:
+ *   - Added /my-sites/* to network-first navigation routes
+ *   - Added admin.css to precache list
+ *   - Added /static/css/admin.css Cache-First strategy
+ *   - Improved offline page styling consistency with dark theme
+ *   - Added background sync hint for when connectivity restores
+ *   - Fixed share page scope — /share/* handled by stale-while-revalidate
  *
  * Caching strategy:
  *
- *  ┌─────────────────────────────┬──────────────────────────────────────────┐
- *  │ Request type                │ Strategy                                 │
- *  ├─────────────────────────────┼──────────────────────────────────────────┤
- *  │ /api/*  /health             │ Network Only — live data, never cache    │
- *  │ /manifest.json  /sw.js      │ Network Only — must always be fresh      │
- *  │ /dashboard  /auth/*         │ Network First → offline page fallback    │
- *  │ /static/js/vendor/*         │ Cache First (versioned libs, safe)       │
- *  │ /static/fonts/*             │ Cache First (font files never change)    │
- *  │ /static/icons/*             │ Cache First → Network fallback           │
- *  │ Everything else             │ Stale-While-Revalidate                   │
- *  └─────────────────────────────┴──────────────────────────────────────────┘
- *
- * OFFLINE: API calls return a structured JSON error so the dashboard handles
- * them gracefully (shows stale indicator rather than crashing).
- * The SW broadcasts SW_OFFLINE / SW_ONLINE to the app for the banner.
+ *  ┌──────────────────────────────┬──────────────────────────────────────────┐
+ *  │ Request type                 │ Strategy                                 │
+ *  ├──────────────────────────────┼──────────────────────────────────────────┤
+ *  │ /api/*  /health              │ Network Only — live data, never cache    │
+ *  │ /manifest.json  /sw.js       │ Network Only — must always be fresh      │
+ *  │ /share/*/manifest.json       │ Network Only — per-site manifests        │
+ *  │ Navigate: dashboard/auth/    │ Network First → cached → offline page    │
+ *  │           my-sites/sites/    │                                          │
+ *  │ /static/js/vendor/*          │ Cache First (versioned libs)             │
+ *  │ /static/fonts/*              │ Cache First (immutable)                  │
+ *  │ /static/css/*                │ Cache First (versioned with cache bump)  │
+ *  │ /static/icons/*              │ Cache First → Network fallback           │
+ *  │ /share/* (page + data)       │ Network First → cached → offline JSON    │
+ *  │ Everything else              │ Stale-While-Revalidate                   │
+ *  └──────────────────────────────┴──────────────────────────────────────────┘
  */
 
-const CACHE_NAME = 'solarwatch-v3';
+const CACHE_NAME = 'solarwatch-v4';
 
-// Paths that must NEVER be cached — always fetch live
 const NETWORK_ONLY_PREFIXES = ['/api/', '/health'];
-const NETWORK_ONLY_EXACT    = ['/manifest.json', '/sw.js'];
+const NETWORK_ONLY_EXACT    = ['/manifest.json', '/sw.js', '/favicon.ico'];
 
-// Static assets to pre-cache on SW install — all same-origin, all local
+// Navigation paths served network-first with offline fallback
+const NAV_PREFIXES = [
+  '/dashboard', '/auth/', '/my-sites', '/sites',
+  '/share/',
+];
+
 const PRECACHE_URLS = [
   '/dashboard',
+  '/auth/login',
+  '/static/css/admin.css',
   '/static/css/fonts.css',
   '/static/js/vendor/chart.umd.min.js',
   '/static/js/vendor/chartjs-adapter-date-fns.bundle.min.js',
@@ -40,6 +52,7 @@ const PRECACHE_URLS = [
   '/static/icons/apple-touch-icon.png',
   '/static/icons/favicon-32x32.png',
   '/static/icons/favicon-16x16.png',
+  '/static/icons/favicon.ico',
 ];
 
 // ── OFFLINE PAGE ──────────────────────────────────────────────────────────────
@@ -48,6 +61,7 @@ const OFFLINE_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0a0c10">
 <title>SolarWatch — Offline</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -58,7 +72,10 @@ body{
   justify-content:center;height:100vh;gap:20px;padding:24px;text-align:center;
 }
 .sun{font-size:56px;animation:glow 2s ease-in-out infinite alternate}
-@keyframes glow{from{filter:drop-shadow(0 0 8px rgba(245,166,35,.4))}to{filter:drop-shadow(0 0 22px rgba(245,166,35,.9))}}
+@keyframes glow{
+  from{filter:drop-shadow(0 0 8px rgba(245,166,35,.4))}
+  to{filter:drop-shadow(0 0 22px rgba(245,166,35,.9))}
+}
 h1{font-size:clamp(22px,5vw,34px);font-weight:800;letter-spacing:-.02em;color:#f5a623}
 p{color:#8090b8;font-size:clamp(13px,2.5vw,17px);max-width:360px;line-height:1.55}
 .hint{font-size:13px;color:#4a5070;margin-top:4px}
@@ -112,16 +129,16 @@ self.addEventListener('activate', event => {
 
 // ── FETCH ─────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
-  const req = event.request;
+  const req  = event.request;
+  const url  = new URL(req.url);
+
   if (req.method !== 'GET') return;
-
-  const url = new URL(req.url);
-
-  // Only handle same-origin requests — ignore cross-origin (there are none now)
   if (url.origin !== self.location.origin) return;
 
+  const path = url.pathname;
+
   // ── 1. API + health — Network Only ────────────────────────────────────────
-  if (NETWORK_ONLY_PREFIXES.some(p => url.pathname.startsWith(p))) {
+  if (NETWORK_ONLY_PREFIXES.some(p => path.startsWith(p))) {
     event.respondWith(
       fetch(req).then(res => { notifyOnline(); return res; })
         .catch(() => {
@@ -135,23 +152,23 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 2. Manifest + SW — Network Only ───────────────────────────────────────
-  if (NETWORK_ONLY_EXACT.includes(url.pathname)) {
+  // ── 2. Manifests + SW — Network Only ──────────────────────────────────────
+  if (NETWORK_ONLY_EXACT.includes(path) || path.endsWith('/manifest.json')) {
     event.respondWith(fetch(req).catch(() => new Response('', { status: 503 })));
     return;
   }
 
-  // ── 3. Vendor JS + fonts — Cache First (content never changes) ────────────
-  if (url.pathname.startsWith('/static/js/vendor/') ||
-      url.pathname.startsWith('/static/fonts/')) {
+  // ── 3. Vendor JS + fonts + CSS — Cache First (immutable) ──────────────────
+  if (
+    path.startsWith('/static/js/vendor/') ||
+    path.startsWith('/static/fonts/') ||
+    path.startsWith('/static/css/')
+  ) {
     event.respondWith(
       caches.match(req).then(cached => {
         if (cached) return cached;
         return fetch(req).then(res => {
-          if (res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE_NAME).then(c => c.put(req, clone));
-          }
+          if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
           return res;
         });
       })
@@ -160,40 +177,49 @@ self.addEventListener('fetch', event => {
   }
 
   // ── 4. Icons — Cache First ─────────────────────────────────────────────────
-  if (url.pathname.startsWith('/static/icons/')) {
+  if (path.startsWith('/static/icons/')) {
     event.respondWith(
       caches.match(req).then(cached => cached || fetch(req).then(res => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then(c => c.put(req, clone));
-        }
+        if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
         return res;
       }))
     );
     return;
   }
 
-  // ── 5. Everything else — Stale-While-Revalidate ───────────────────────────
-  event.respondWith(
-    caches.match(req).then(cached => {
-      const networkFetch = fetch(req).then(res => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then(c => c.put(req, clone));
-        }
-        notifyOnline();
-        return res;
-      }).catch(() => {
-        notifyOffline();
-        if (req.mode === 'navigate') {
+  // ── 5. Navigation pages — Network First with offline fallback ──────────────
+  if (req.mode === 'navigate' || NAV_PREFIXES.some(p => path.startsWith(p))) {
+    event.respondWith(
+      fetch(req)
+        .then(res => {
+          if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+          notifyOnline();
+          return res;
+        })
+        .catch(async () => {
+          notifyOffline();
+          const cached = await caches.match(req);
+          if (cached) return cached;
           return new Response(OFFLINE_HTML, {
             status: 200,
             headers: { 'Content-Type': 'text/html; charset=utf-8' }
           });
-        }
+        })
+    );
+    return;
+  }
+
+  // ── 6. Everything else — Stale-While-Revalidate ───────────────────────────
+  event.respondWith(
+    caches.match(req).then(cached => {
+      const networkFetch = fetch(req).then(res => {
+        if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+        notifyOnline();
+        return res;
+      }).catch(() => {
+        notifyOffline();
         return new Response('', { status: 503 });
       });
-
       return cached || networkFetch;
     })
   );

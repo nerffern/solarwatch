@@ -24,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_config
 from app.db import dispose_engine
-from app.routers import api, auth, main, solar, sites, share
+from app.routers import api, auth, main, solar, sites, share, my_sites
 from app.startup import run_startup_checks
 from app.auth import _RedirectException
 
@@ -167,6 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(solar.router)
     app.include_router(sites.router)
     app.include_router(share.router)
+    app.include_router(my_sites.router)
 
     # ---------------------------------------------------------------------------
     # Exception handler for redirects raised inside Depends() guards.

@@ -79,7 +79,7 @@
                 <span class="sw-badge disabled">Disabled</span>
               {% endif %}
             </td>
-            <td class="mono" style="font-size:.78rem;color:var(--muted)">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '—' }}</td>
+            <td class="mono" style="font-size:.78rem;color:var(--muted)">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at and user.created_at.__class__.__name__ == 'datetime' else (user.created_at | string)[:10] if user.created_at else '—' }}</td>
             <td>
               <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">
                 <form method="post" action="/auth/admin/users/{{ user.id }}/toggle">

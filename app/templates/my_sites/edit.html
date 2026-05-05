@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %} — {{ site.display_name }}{% endblock %}
+{% block content %}
+<div class="sw-page" style="max-width:860px">
+
+  <div class="sw-page-header">
+    <div>
+      <h1 class="sw-page-title">{{ site.display_name }}</h1>
+      <p class="sw-page-subtitle">Edit your site configuration.</p>
+    </div>
+    <a class="sw-btn ghost" href="/my-sites">← My Sites</a>
+  </div>
+
+  <!-- ── Site details ── -->
+  <div class="sw-card">
+    <div class="sw-card-title">Site details</div>
+    <form method="post" action="/my-sites/{{ site.id }}/edit">
+      <div class="sw-form-row cols-2">
+        <div class="sw-field">
+          <label>Display name <span class="req">*</span></label>
+          <input class="sw-input" name="display_name" value="{{ site.display_name }}" required>
+        </div>
+        <div class="sw-field">
+          <label>Source type</label>
+          <input class="sw-input" value="{{ site.source_type }}" disabled>
+        </div>
+        <div class="sw-field" style="grid-column:1/-1">
+          <label>Location</label>
+          <input class="sw-input" name="location" value="{{ site.location or '' }}" placeholder="e.g. Selati, Limpopo, ZA">
+        </div>
+        <div class="sw-field">
+          <label>Latitude</label>
+          <input class="sw-input" name="latitude" type="number" step="0.000001"
+                 value="{{ site.latitude if site.latitude else '' }}" placeholder="-24.052200">
+          <div class="sw-field-hint">Decimal degrees — used for weather data.</div>
+        </div>
+        <div class="sw-field">
+          <label>Longitude</label>
+          <input class="sw-input" name="longitude" type="number" step="0.000001"
+                 value="{{ site.longitude if site.longitude else '' }}" placeholder="31.263700">
+        </div>
+      </div>
+
+      {% if site.source_type == 'sunsynk' %}
+      <hr class="sw-divider">
+      <div class="sw-card-title">Sunsynk cloud credentials</div>
+      <div class="sw-form-row cols-2">
+        <div class="sw-field">
+          <label>Username</label>
+          <input class="sw-input" name="sunsynk_username" value="{{ site.sunsynk_username or '' }}">
+        </div>
+        <div class="sw-field">
+          <label>Password</label>
+          <input class="sw-input" name="sunsynk_password" type="password" placeholder="Leave blank to keep existing">
+        </div>
+        <div class="sw-field">
+          <label>Plant ID</label>
+          <input class="sw-input" name="sunsynk_plant_id" value="{{ site.sunsynk_plant_id or '' }}">
+        </div>
+      </div>
+      {% endif %}
+
+      <div style="margin-top:1rem">
+        <button class="sw-btn primary" type="submit">Save changes</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ── Inverters (Deye only) ── -->
+  {% if site.source_type == 'deye' %}
+  <div class="sw-card">
+    <div class="sw-card-title">Inverters</div>
+
+    {% if inverters %}
+    <div class="sw-table-wrap" style="margin-bottom:1rem">
+      <table class="sw-table">
+        <thead>
+          <tr><th>Name</th><th>IP address</th><th>Dongle serial</th><th>Inverter SN</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for inv in inverters %}
+          <tr>
+            <td><code>{{ inv.name }}</code></td>
+            <td class="mono" style="color:var(--info)">{{ inv.ip }}</td>
+            <td class="mono" style="color:var(--muted);font-size:.8rem">{{ inv.dongle_serial }}</td>
+            <td class="mono" style="color:var(--muted);font-size:.8rem">{{ inv.inverter_sn }}</td>
+            <td style="text-align:right">
+              <form method="post" action="/my-sites/{{ site.id }}/inverters/{{ loop.index0 }}/delete">
+                <button class="sw-btn danger" style="font-size:.72rem;padding:4px 10px" type="submit"
+                        onclick="return confirm('Remove {{ inv.name }}?')">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:.875rem;margin-bottom:1rem">No inverters configured yet.</p>
+    {% endif %}
+
+    <hr class="sw-divider">
+    <div class="sw-section-label">Add inverter</div>
+    <form method="post" action="/my-sites/{{ site.id }}/inverters/add">
+      <div class="sw-form-row" style="grid-template-columns:2fr 2fr 1.5fr 1.5fr auto;gap:.5rem;align-items:end">
+        <div class="sw-field"><label>Name</label><input class="sw-input" name="inv_name" placeholder="Inverter_1" required></div>
+        <div class="sw-field"><label>IP address</label><input class="sw-input" name="inv_ip" placeholder="192.168.10.3" required></div>
+        <div class="sw-field"><label>Dongle serial</label><input class="sw-input" name="dongle_serial" placeholder="2705000422"></div>
+        <div class="sw-field"><label>Inverter SN</label><input class="sw-input" name="inverter_sn" placeholder="2208262350"></div>
+        <div><button class="sw-btn primary" type="submit" style="margin-top:1.25rem">Add</button></div>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- ── Share link ── -->
+  <div class="sw-card">
+    <div class="sw-card-title">Public share link</div>
+    <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
+      Generate a read-only share link for this site. Anyone with the link can view the live dashboard.
+      Regenerating immediately revokes the old link. Installable as a PWA on phones and screens.
+    </p>
+
+    {% if site.share_token %}
+    {% set share_url = request.url.scheme ~ "://" ~ request.headers.get("host", "your-domain") ~ "/share/" ~ site.share_token %}
+    <div style="background:var(--s2);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:.75rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+      <span id="share-url-text" style="font-family:var(--mono);font-size:.78rem;color:var(--solar);word-break:break-all;flex:1">{{ share_url }}</span>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('share-url-text').textContent.trim()).then(function(){this.textContent='Copied!';var b=this;setTimeout(function(){b.textContent='Copy'},1500)}.bind(this))"
+              class="sw-btn" style="font-size:.72rem;padding:4px 12px;white-space:nowrap" type="button">Copy</button>
+      <a class="sw-btn dashboard" href="{{ share_url }}" target="_blank" rel="noopener"
+         style="font-size:.72rem;padding:4px 12px;white-space:nowrap">Preview ↗</a>
+    </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <form method="post" action="/my-sites/{{ site.id }}/token/generate">
+        <button class="sw-btn" style="font-size:.72rem;padding:4px 12px" type="submit">Regenerate link</button>
+      </form>
+      <form method="post" action="/my-sites/{{ site.id }}/token/revoke">
+        <button class="sw-btn danger" style="font-size:.72rem;padding:4px 12px" type="submit">Revoke link</button>
+      </form>
+    </div>
+    {% else %}
+    <form method="post" action="/my-sites/{{ site.id }}/token/generate">
+      <button class="sw-btn primary" type="submit">Generate share link</button>
+    </form>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

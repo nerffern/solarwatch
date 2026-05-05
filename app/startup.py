@@ -151,7 +151,7 @@ def _ensure_system_roles() -> List[str]:
         with get_connection() as conn:
             for role_name, description in (
                 ("admin",       "Full administrative access — all sites, all users"),
-                ("user",        "Standard authenticated user — assigned sites only"),
+                ("user",        "Read-only viewer — identical to site_viewer (legacy name)"),
                 ("site_admin",  "Site administrator — manage assigned sites and their users"),
                 ("site_viewer", "Read-only access to assigned sites"),
             ):
@@ -280,6 +280,44 @@ def _verify_solarwatch_tables() -> List[str]:
         ]
     return []
 
+
+
+def _check_performance_indexes() -> List[str]:
+    """Warn if the recommended performance indexes are missing.
+
+    These indexes are created by migrate_indexes.sql (run as postgres superuser).
+    Without them, chart queries on large solar_readings tables will be slow.
+    This is a WARNING not a hard failure — the app works without them.
+    """
+    recommended = {
+        "idx_sw_unique_reading": "solar_readings (time, site_name, inverter_name)",
+        "idx_wx_unique_reading": "weather_readings (time, site_name)",
+    }
+    try:
+        with get_connection() as conn:
+            existing = {
+                row[0] for row in conn.execute(
+                    text(
+                        """
+                        SELECT indexname FROM pg_indexes
+                        WHERE tablename IN ('solar_readings', 'weather_readings')
+                        AND schemaname = 'public'
+                        """
+                    )
+                )
+            }
+        missing = [
+            f"Index {name} missing on {cols} — run migrate_indexes.sql for better chart performance"
+            for name, cols in recommended.items()
+            if name not in existing
+        ]
+        if missing:
+            import logging
+            logging.getLogger(__name__).warning("Performance indexes missing: %s", missing)
+        return []  # Warnings only — don't block startup
+    except Exception as exc:
+        return []  # Non-critical — don't block on index check failure
+
 STARTUP_STEPS: List[StartupStep] = [
     StartupStep("Validate required environment variables", _validate_required_env_vars),
     StartupStep("Verify database connectivity", _verify_database_connectivity),
@@ -287,6 +325,7 @@ STARTUP_STEPS: List[StartupStep] = [
     StartupStep("Ensure system roles exist", _ensure_system_roles),
     StartupStep("Ensure admin user exists", _ensure_admin_user),
     StartupStep("Verify SolarWatch data tables", _verify_solarwatch_tables),
+    StartupStep("Check performance indexes", _check_performance_indexes),
 ]
 
 

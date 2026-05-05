@@ -40,9 +40,9 @@ templates = Jinja2Templates(directory="app/templates")
 # TTL cache — identical to powerflow_server.py
 # Keyed by (endpoint, site). Cuts DB hits by ~80% on multi-browser deployments.
 #   /api/solar/flow    → 10 s  (matches frontend poll interval)
-#   /api/solar/weather → 60 s
+#   /api/solar/weather → 90 s
 #   /api/solar/monthly → 120 s
-#   /api/solar/chart/* → 60 s
+#   /api/solar/chart/* → 120 s
 # ---------------------------------------------------------------------------
 
 _cache: dict[str, tuple[float, Any]] = {}
@@ -278,7 +278,7 @@ _WMO = {
 
 def _get_weather(site: str) -> dict:
     key = f"weather:{site}"
-    cached = _cache_get(key, ttl=60)
+    cached = _cache_get(key, ttl=90)
     if cached is not None:
         return cached
 
@@ -318,7 +318,7 @@ def _get_weather(site: str) -> dict:
 
 def _get_chart(chart: str, site: str) -> Any:
     key = f"chart:{chart}:{site}"
-    cached = _cache_get(key, ttl=60)
+    cached = _cache_get(key, ttl=120)
     if cached is not None:
         return cached
 

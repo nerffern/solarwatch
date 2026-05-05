@@ -1,3 +1,3 @@
 """Route modules for SolarWatch."""
-from app.routers import api, auth, main, solar, sites, share
-__all__ = ["auth", "main", "api", "solar", "sites", "share"]
+from app.routers import api, auth, main, solar, sites, share, my_sites
+__all__ = ["auth", "main", "api", "solar", "sites", "share", "my_sites"]

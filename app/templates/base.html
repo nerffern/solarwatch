@@ -16,6 +16,14 @@
   <link rel="stylesheet" href="/static/css/admin.css">
 
   <title>SolarWatch{% block title %}{% endblock %}</title>
+
+  <script>
+    // Register service worker for PWA support on all admin pages
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .catch(e => console.warn('SW registration failed:', e));
+    }
+  </script>
 </head>
 <body>
 
@@ -32,6 +40,8 @@
           <a class="sw-btn" href="/sites">Sites</a>
           <a class="sw-btn" href="/auth/admin/users">Users</a>
           <a class="sw-btn" href="/auth/admin/roles">Roles</a>
+        {% elif current_user.role_name == "site_admin" %}
+          <a class="sw-btn" href="/my-sites">My Sites</a>
         {% endif %}
         <a class="sw-btn ghost" href="/auth/logout">Sign out</a>
       {% else %}

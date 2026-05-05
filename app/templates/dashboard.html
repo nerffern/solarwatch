@@ -570,8 +570,15 @@ footer{
       </select>
     </div>
 
-    <!-- Admin link (visible to all logged-in users, links to admin or dashboard settings) -->
-    <a class="admin-btn" href="/auth/admin" title="Admin console">⚙ Admin</a>
+    <!-- Nav buttons — role-aware -->
+    {% if current_user %}
+      {% if current_user.role_name == "admin" %}
+        <a class="admin-btn" href="/auth/admin" title="Admin console">⚙ Admin</a>
+      {% elif current_user.role_name == "site_admin" %}
+        <a class="admin-btn" href="/my-sites" title="My sites">⚙ My Sites</a>
+      {% endif %}
+      <a class="signout-btn" href="/auth/logout" title="Sign out">↩ Sign out</a>
+    {% endif %}
 
     <!-- Age -->
     <div class="age-badge"><div class="dot" id="dot"></div><span id="age">—</span></div>
