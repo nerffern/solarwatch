@@ -155,12 +155,13 @@ spec:
             - python
             - collector.py
 
-          # Collector uses PG_* vars from the shared secret
+          # DATABASE_URL and all secrets come from the shared Secret.
+          # Both web app and collector use DATABASE_URL — one Secret covers both.
           envFrom:
             - secretRef:
                 name: {{ include "solarwatch.secretName" . }}
 
-          # Collector-specific config
+          # Collector-specific tuning (non-sensitive)
           env:
             - name: POLL_INTERVAL
               value: {{ .Values.collector.pollInterval | quote }}
@@ -171,9 +172,7 @@ spec:
             - name: MAX_RETRIES
               value: {{ .Values.collector.maxRetries | quote }}
             - name: RETRY_DELAY
-              value: {{ .Values.collector.retryDelay | quote }}
-            - name: PG_SSLMODE
-              value: "prefer"
+              value: {{ .Values.collector.retryDelay | quote }}"
 
           resources:
             {{- toYaml .Values.collectorResources | nindent 12 }}

@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS sites (
     sunsynk_username    TEXT,
     sunsynk_password    TEXT,
     sunsynk_plant_id    TEXT,
+    -- Public share link token. NULL = sharing disabled.
+    -- Regenerating revokes the old link instantly.
+    share_token         TEXT        UNIQUE DEFAULT NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -129,6 +132,10 @@ CREATE UNIQUE INDEX idx_sw_unique_reading
     ON solar_readings (time, site_name, inverter_name);
 CREATE UNIQUE INDEX idx_wx_unique_reading
     ON weather_readings (time, site_name);
+
+-- Share token lookup index (partial — allows multiple NULL values)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sites_share_token
+    ON sites (share_token) WHERE share_token IS NOT NULL;
 
 -- ── 8. Seed sites ─────────────────────────────────────────────────────────────
 

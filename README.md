@@ -66,38 +66,38 @@ This section covers a complete fresh installation from scratch.
 
 ### 2. Database provisioning
 
-Run `setup.sql` as the postgres superuser. This creates the database, user,
-schema, tables, indexes, and seeds your initial sites.
+Run `setup.sql` once as the postgres superuser. This creates everything in one shot.
 
 ```bash
 psql -h your-postgres-host -U postgres -f setup.sql
 ```
 
-`setup.sql` is idempotent — it uses `IF NOT EXISTS` and `ON CONFLICT DO NOTHING`
-throughout so it is safe to re-run. It will:
+`setup.sql` creates:
+- `solarwatch_user` (password `CHANGEME` — change this immediately)
+- The `solarwatch` database
+- All tables: `sites` (with `share_token`), `solar_readings`, `weather_readings`
+- All performance indexes including the unique indexes for the collector
+- Example Selati and Lanner sites (edit or remove to match your setup)
 
-- Create `solarwatch_user` with password `CHANGEME` (change this immediately)
-- Create the `solarwatch` database
-- Create all tables: `sites`, `solar_readings`, `weather_readings`
-- Create all performance indexes
-- Seed example Selati and Lanner sites (edit or remove as needed)
+**That's it for a fresh install. The migration files are for upgrades only.**
 
-**Change the default password before running the collector:**
+**Change the default DB password before starting the collector:**
 ```sql
--- Connect as postgres
+-- Run as postgres superuser
 ALTER USER solarwatch_user WITH PASSWORD 'your-secure-password';
 ```
 
-### 3. Share token column (required for share links)
+### About the migration SQL files
 
-The `share_token` column on the `sites` table must be added by the postgres
-superuser (the app user does not own the `sites` table and cannot run DDL):
+| File | When to run |
+|---|---|
+| `setup.sql` | **Fresh install only** — creates everything from scratch |
+| `migrate_share.sql` | **Upgrade only** — adds `share_token` to an existing DB created before v1.0 |
+| `migrate_indexes.sql` | **Upgrade only** — adds performance indexes to an existing DB created before v1.0 |
+| `migrate_weather.sql` | **Upgrade only** — adds weather table to an existing DB created before weather support |
 
-```bash
-psql -h your-postgres-host -U postgres -d solarwatch -f migrate_share.sql
-```
-
-This is safe to run even if the column already exists.
+If you are doing a fresh install using the current `setup.sql`, none of the
+migration files are needed — everything is already included.
 
 ### 4. Configure the application
 
@@ -213,17 +213,15 @@ Config changes in the web UI are picked up on the next config reload (every 5 mi
 Schema changes to postgres-owned tables require running the SQL migration files
 as the postgres superuser. App-owned tables are managed automatically by startup.
 
-**Migration files:**
+**For upgrades from pre-v1.0 installations only:**
 ```bash
-# Required: share token column (run once after initial setup)
-psql -h host -U postgres -d solarwatch -f migrate_share.sql
-
-# Optional: additional performance indexes (if not already in setup.sql)
-psql -h host -U postgres -d solarwatch -f migrate_indexes.sql
-
-# Optional: if upgrading from an older version without weather support
-psql -h host -U postgres -d solarwatch -f migrate_weather.sql
+# If upgrading an existing DB — run whichever apply to your situation
+psql -h host -U postgres -d solarwatch -f migrate_share.sql    # adds share_token
+psql -h host -U postgres -d solarwatch -f migrate_indexes.sql  # adds performance indexes
+psql -h host -U postgres -d solarwatch -f migrate_weather.sql  # adds weather table
 ```
+
+Fresh installs using the current `setup.sql` do not need any of these.
 
 ---
 

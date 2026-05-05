@@ -1,5 +1,10 @@
 -- SolarWatch — migrate_share.sql
 --
+-- FOR UPGRADES ONLY.
+-- Fresh installs using setup.sql do NOT need this file —
+-- share_token is already included in setup.sql as of v1.0.
+--
+-- Run this ONLY if upgrading a database created before v1.0:
 -- Adds the share_token column to the sites table.
 -- Must be run as the postgres superuser (or any role that owns the sites table),
 -- because solarwatch_user does not have DDL privileges on tables it does not own.
