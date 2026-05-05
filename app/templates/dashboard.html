@@ -516,11 +516,22 @@ footer{
   <div class="ob-dot"></div>
   <span>You're offline — showing last known data</span>
 </div>
+<div id="stale-banner" role="alert" aria-live="polite" style="
+  position:fixed;bottom:0;left:0;right:0;z-index:9998;
+  display:none;align-items:center;justify-content:center;gap:10px;
+  padding:10px 16px;
+  background:rgba(243,156,18,.95);color:#000;
+  font-family:var(--sans);font-size:clamp(12px,1.2vw,14px);font-weight:600;
+  transform:translateY(100%);transition:transform .3s ease;
+">
+  <div style="width:8px;height:8px;border-radius:50%;background:#000;animation:pulse 1.5s infinite;flex-shrink:0"></div>
+  <span id="stale-banner-msg">Data is stale — inverter may be offline</span>
+</div>
 <div class="app">
 
 <!-- HEADER -->
 <header>
-  <div class="logo"><span class="la">◆</span> SolarWatch <span class="ls">/</span> <span class="lb" id="view-label">Power Flow</span></div>
+  <div class="logo"><span class="la">◆</span> SolarWatch <span class="ls">/</span> <span class="lb" id="view-label">Power Flow</span><span style="font-size:clamp(8px,.65vw,10px);color:var(--border);margin-left:8px;font-family:var(--mono)">v{{ APP_VERSION }}</span></div>
   <div class="hdr-right">
 
     <!-- Rate selector -->
@@ -1013,7 +1024,24 @@ function render(d){
   document.getElementById('a-grid-today').textContent=(d.daily_grid_kwh??0)+' kWh';
 
   document.getElementById('dot').className='dot'+(d.stale?' stale':'');
-  document.getElementById('age').textContent=d.age_s!==null?d.age_s+'s ago':'live';
+  const ageText = d.age_s !== null ? d.age_s + 's ago' : 'live';
+  document.getElementById('age').textContent = ageText;
+  // Show stale banner if data age exceeds 5 minutes (300s)
+  const staleBanner = document.getElementById('stale-banner');
+  if (staleBanner) {
+    if (d.stale && d.age_s !== null) {
+      const mins = Math.round(d.age_s / 60);
+      document.getElementById('stale-banner-msg').textContent =
+        mins > 1
+          ? `Data is ${mins} minutes old — inverter or collector may be offline`
+          : 'Data is stale — inverter may be offline';
+      staleBanner.style.display = 'flex';
+      setTimeout(() => staleBanner.style.transform = 'translateY(0)', 10);
+    } else {
+      staleBanner.style.transform = 'translateY(100%)';
+      setTimeout(() => { if (!d.stale) staleBanner.style.display = 'none'; }, 300);
+    }
+  }
 
   drawLines(d);
 }

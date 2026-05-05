@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import pathlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -59,6 +60,10 @@ def _build_csp(config) -> str:
 
 
 def create_app() -> FastAPI:
+    # Read version from VERSION file — used in templates and /api/version
+    _version_file = pathlib.Path(__file__).parent.parent / "VERSION"
+    APP_VERSION = _version_file.read_text().strip() if _version_file.exists() else "dev"
+
     dotenv_loaded = _load_dotenv_if_available()
     LOGGER.info("Dotenv loaded: %s", dotenv_loaded)
 
@@ -86,10 +91,15 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="SolarWatch",
-        docs_url="/api/docs" if getattr(config, "DEBUG", False) else None,
-        redoc_url="/api/redoc" if getattr(config, "DEBUG", False) else None,
+        version=APP_VERSION,
+        # Docs are served at /api/docs but protected by a login check in main.py
+        # Available in both dev and prod — admins need API access too.
+        docs_url=None,   # We serve docs via a protected route in main.py
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
+    app.state.version = APP_VERSION
 
     # ---------------------------------------------------------------------------
     # Session middleware.
@@ -177,6 +187,11 @@ def create_app() -> FastAPI:
     @app.exception_handler(_RedirectException)
     async def redirect_exception_handler(request: Request, exc: _RedirectException):
         return RedirectResponse(url=exc.url, status_code=exc.status_code)
+
+    # Inject APP_VERSION into all Jinja2 template contexts automatically
+    from fastapi.templating import Jinja2Templates as _J2T
+    _j2 = _J2T(directory="app/templates")
+    _j2.env.globals["APP_VERSION"] = APP_VERSION
 
     # Static files
     app.mount("/static", StaticFiles(directory="static"), name="static")

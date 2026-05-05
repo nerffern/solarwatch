@@ -13,6 +13,13 @@ from app.auth import login_required, require_role
 router = APIRouter(prefix="/api", tags=["api"])
 
 
+@router.get("/version")
+async def api_version(request: Request):
+    """Return the running application version. No auth required."""
+    version = getattr(request.app.state, "version", "dev")
+    return {"version": version, "name": "SolarWatch"}
+
+
 @router.get("/me")
 async def api_me(request: Request, user=Depends(login_required)):
     """Return the current user's public profile."""

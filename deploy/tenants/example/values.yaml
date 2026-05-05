@@ -1,0 +1,52 @@
+# deploy/tenants/example/values.yaml
+# Example tenant configuration — copy and customise for each deployment.
+#
+# Deploy:
+#   helm upgrade --install solarwatch deploy/helm/solarwatch \
+#     -f deploy/tenants/example/values.yaml \
+#     --namespace solarwatch --create-namespace
+
+image:
+  repository: registry.hfisystems.com/hfisystems/solarwatch
+  tag: "1.0.0"      # Pin to a specific version in production
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: hfisystems-registry
+
+replicaCount: 2
+gunicornWorkers: 2
+
+secrets:
+  secretKey: "replace-with-python-secrets-token-hex-32"
+  databaseUrl: "postgresql+psycopg2://solarwatch_user:your-password@postgres-ha.your-domain:5432/solarwatch"
+  adminUsername: "admin"
+  adminPassword: "replace-before-first-login"
+
+env:
+  APP_ENV: production
+  APP_PROXY_FIX: "true"
+  DB_POOL_SIZE: "3"
+  DB_MAX_OVERFLOW: "2"
+
+namespace: solarwatch
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  host: solarwatch.your-domain.com
+  tls:
+    - secretName: solarwatch-tls
+      hosts:
+        - solarwatch.your-domain.com
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

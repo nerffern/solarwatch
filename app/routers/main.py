@@ -10,8 +10,11 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+
+from app.auth import require_role
 
 router = APIRouter(tags=["main"])
 
@@ -61,4 +64,28 @@ async def favicon():
     return FileResponse(
         _STATIC / "icons" / "favicon.ico",
         media_type="image/x-icon",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Protected API docs — admin only, available in all environments
+# ---------------------------------------------------------------------------
+
+@router.get("/api/docs", response_class=HTMLResponse, include_in_schema=False)
+async def api_docs(request: Request, user=Depends(require_role("admin"))):
+    """Swagger UI — admin only. Available in development and production."""
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title="SolarWatch API — Swagger UI",
+        swagger_favicon_url="/favicon.ico",
+    )
+
+
+@router.get("/api/redoc", response_class=HTMLResponse, include_in_schema=False)
+async def api_redoc(request: Request, user=Depends(require_role("admin"))):
+    """ReDoc — admin only."""
+    return get_redoc_html(
+        openapi_url="/api/openapi.json",
+        title="SolarWatch API — ReDoc",
+        redoc_favicon_url="/favicon.ico",
     )
