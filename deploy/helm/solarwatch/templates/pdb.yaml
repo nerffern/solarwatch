@@ -1,0 +1,15 @@
+# PodDisruptionBudget — ensures at least 1 web pod is always available
+# during node drains, cluster upgrades, and voluntary disruptions.
+# This is what prevents both web pods from going down simultaneously
+# during a rolling update or DC maintenance.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "solarwatch.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: solarwatch
+      component: web

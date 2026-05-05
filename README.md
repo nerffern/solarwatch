@@ -435,7 +435,33 @@ docker compose up
 The `deploy/helm/solarwatch` chart deploys the web app. The collector is
 deployed separately (systemd on a worker node or as its own Deployment).
 
-### Create the image pull secret (private registry)
+The chart deploys **both** the web app and the collector from a single Helm release.
+The chart structure mirrors the WTS chart so deployment procedures are identical.
+
+### Prerequisites
+
+Your K8s nodes must be labelled with `topology.kubernetes.io/zone`:
+```bash
+# Label Lanner nodes
+kubectl label node <lanner-node> topology.kubernetes.io/zone=lnr
+
+# Label Xneelo nodes
+kubectl label node <xneelo-node> topology.kubernetes.io/zone=xne
+```
+
+The web app uses `topologySpreadConstraints` to ensure one pod lands in each
+zone — matching your WTS multi-DC pattern exactly.
+
+### Create the namespace
+
+```bash
+kubectl create namespace solarwatch
+```
+
+The namespace is not managed by Helm (matching WTS convention) — create it
+manually so `helm uninstall` doesn't accidentally destroy everything.
+
+### Create the image pull secret
 
 ```bash
 kubectl create secret docker-registry hfisystems-registry \
@@ -446,99 +472,127 @@ kubectl create secret docker-registry hfisystems-registry \
   --namespace solarwatch
 ```
 
-Replace:
-- `<your-gitlab-username>` — your GitLab username
-- `<your-gitlab-token>` — Personal Access Token with `read_registry` scope
-- `<your-email>` — your email address
-
-### Configure a tenant
+### Configure a tenant values file
 
 ```bash
-# Create tenant values file
-mkdir -p deploy/tenants/mysite
-cp deploy/tenants/example/values.yaml deploy/tenants/mysite/values.yaml
-# Edit values.yaml — set secrets, database URL, ingress host, image tag
+mkdir -p deploy/tenants/solarwatch
+cp deploy/tenants/example/values.yaml deploy/tenants/solarwatch/values.yaml
 ```
 
-Key values to set (must align with `.env.example` for consistent behaviour across dev and prod):
+Key values to set (all others have safe defaults):
 
 ```yaml
 image:
-  tag: "1.0.0"          # pin to specific version — must match VERSION file
+  tag: "1.0.0"              # must match VERSION file
 
-imagePullSecrets:
-  - name: hfisystems-registry
+database:
+  host: postgres-ha.hfisystems.com
+  name: solarwatch
+  user: solarwatch_user
+  password: "your-db-password"
 
 secrets:
-  secretKey: "<python -c 'import secrets; print(secrets.token_hex(32))'>"
-  databaseUrl: "postgresql+psycopg2://solarwatch_user:pass@postgres-ha:5432/solarwatch"
+  secretKey: "generate-with-python-secrets-token-hex-32"
   adminUsername: admin
-  adminPassword: "<strong-initial-password>"
+  adminPassword: "strong-initial-password"
 
-ingress:
+collector:
   enabled: true
-  host: solarwatch.your-domain.com
+  zone: lnr                  # pin collector to Lanner (has inverter access)
 ```
 
 ### Deploy
 
 ```bash
-# Create namespace
-kubectl create namespace solarwatch
-
-# Install / upgrade
+# Install / upgrade (same command for both — Helm is idempotent)
 helm upgrade --install solarwatch deploy/helm/solarwatch \
-  -f deploy/tenants/mysite/values.yaml \
-  --namespace solarwatch \
-  --create-namespace
+  -f deploy/tenants/solarwatch/values.yaml \
+  --namespace solarwatch
 
-# Check rollout
+# Check all pods
+kubectl get pods -n solarwatch
+# Expected: 2 web pods (one xne, one lnr) + 1 collector pod (lnr)
+
+# Check web rollout
 kubectl rollout status deployment/solarwatch -n solarwatch
 
-# View pods
-kubectl get pods -n solarwatch
+# Check collector
+kubectl rollout status deployment/solarwatch-collector -n solarwatch
 
-# View logs
-kubectl logs -n solarwatch -l app=solarwatch --tail=50 -f
+# Web logs
+kubectl logs -n solarwatch -l component=web --tail=50 -f
+
+# Collector logs
+kubectl logs -n solarwatch -l component=collector --tail=100 -f
 ```
+
+### Cloudflare Tunnel (no Ingress needed)
+
+The chart has `ingress.enabled: false` by default. With Cloudflare Tunnel
+running on each node, point your tunnel config to the Service DNS name:
+
+```yaml
+# In your cloudflared config.yaml or tunnel route:
+ingress:
+  - hostname: solarwatch.your-domain.com
+    service: http://solarwatch.solarwatch.svc.cluster.local:80
+```
+
+No LoadBalancer, no NodePort, no cert-manager needed. Cloudflare handles TLS.
+
+### What each pod does
+
+| Pod | Replicas | Zone | Purpose |
+|---|---|---|---|
+| `solarwatch-*` | 2 | xne + lnr | Web app + API (gunicorn + uvicorn) |
+| `solarwatch-collector-*` | 1 | lnr (configurable) | Polls inverters, writes to DB |
+
+The PodDisruptionBudget ensures at least 1 web pod stays alive during node
+drains and cluster maintenance — matching the WTS `minAvailable: 1` pattern.
+
+### Moving the collector between DCs
+
+If Lanner is down and you need the collector to run from Xneelo:
+
+```yaml
+# In your tenant values.yaml
+collector:
+  zone: xne
+```
+
+```bash
+helm upgrade solarwatch deploy/helm/solarwatch \
+  -f deploy/tenants/solarwatch/values.yaml \
+  --namespace solarwatch
+```
+
+The old collector pod is terminated, a new one starts in the Xneelo zone.
 
 ### Rolling updates (zero downtime)
 
 ```bash
-# Update image tag in values.yaml, then:
+# Update VERSION, build and push new Docker image, then:
 helm upgrade solarwatch deploy/helm/solarwatch \
-  -f deploy/tenants/mysite/values.yaml \
+  -f deploy/tenants/solarwatch/values.yaml \
   --namespace solarwatch
 ```
 
-The chart uses `RollingUpdate` with `maxUnavailable: 0` — at least one pod
-is always serving traffic during deploys.
+`maxUnavailable: 0` ensures at least one web pod serves traffic at all times.
+The collector restarts briefly during updates — one poll cycle is missed.
 
-### Multi-DC topology
+### Critical: SECRET_KEY must be identical across all pods
 
-The chart includes `topologySpreadConstraints` that spread pods across nodes.
-For multi-DC deployments (e.g. Lanner + Xneelo):
-
-```yaml
-topologySpreadConstraints:
-  - maxSkew: 1
-    topologyKey: kubernetes.io/hostname
-    whenUnsatisfiable: DoNotSchedule
-    labelSelector:
-      matchLabels:
-        app: solarwatch
-```
-
-**Critical:** `SECRET_KEY` must be **identical across all pods in all
-datacentres**. Sessions are signed cookies — a pod with a different key
-rejects sessions created by other pods and logs users out.
+Sessions are signed cookies. A pod with a different `SECRET_KEY` rejects
+sessions from other pods and logs users out. Store it in `secrets.secretKey`
+in your tenant values file and never change it unless you intentionally want
+to invalidate all active sessions.
 
 ### Health probes
 
-The `/health` endpoint always returns `200 {"status": "ok"}`. Used for both
-liveness and readiness probes. If startup checks fail (DB unreachable, missing
-tables), `/health` still returns 200 but all other routes return 503 until the
-issue is resolved.
+`/health` always returns `200 {"status": "ok"}`. If startup checks fail
+(DB unreachable, missing columns) the app serves `503` on all other routes
+until resolved — the pod stays in the load balancer so Cloudflare Tunnel
+can still reach it for health checking.
 
 ---
 

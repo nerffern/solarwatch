@@ -1,5 +1,6 @@
 # deploy/tenants/example/values.yaml
-# Example tenant configuration — copy and customise for each deployment.
+#
+# Copy this to deploy/tenants/<name>/values.yaml and fill in real values.
 #
 # Deploy:
 #   helm upgrade --install solarwatch deploy/helm/solarwatch \
@@ -8,40 +9,62 @@
 
 image:
   repository: registry.hfisystems.com/hfisystems/solarwatch
-  tag: "1.0.0"      # Pin to a specific version in production
+  tag: "1.0.0"
   pullPolicy: Always
+  pullSecret: hfisystems-registry
 
-imagePullSecrets:
-  - name: hfisystems-registry
-
+# Web app: 2 replicas minimum — one in xne, one in lnr
+# Spread enforced by topologySpreadConstraints on topology.kubernetes.io/zone
 replicaCount: 2
 gunicornWorkers: 2
 
+# Collector: single pod pinned to the zone with inverter access
+collector:
+  enabled: true
+  zone: lnr          # Change to xne if inverters are reachable from Xneelo
+  pollInterval: "60"
+  weatherInterval: "900"
+  configReload: "300"
+  maxRetries: "3"
+  retryDelay: "5"
+
+# Database — matches setup.sql defaults
+database:
+  host: postgres-ha.hfisystems.com
+  port: "5432"
+  name: solarwatch
+  user: solarwatch_user
+  password: "REPLACE-WITH-REAL-PASSWORD"
+
+# Secrets — set these before deploying
 secrets:
-  secretKey: "replace-with-python-secrets-token-hex-32"
-  databaseUrl: "postgresql+psycopg2://solarwatch_user:your-password@postgres-ha.your-domain:5432/solarwatch"
-  adminUsername: "admin"
-  adminPassword: "replace-before-first-login"
+  secretKey: "REPLACE-WITH-python-secrets-token-hex-32"
+  adminUsername: admin
+  adminPassword: "REPLACE-BEFORE-FIRST-LOGIN"
 
 env:
   APP_ENV: production
   APP_PROXY_FIX: "true"
   DB_POOL_SIZE: "3"
   DB_MAX_OVERFLOW: "2"
+  DB_POOL_TIMEOUT: "30"
+  RATE_LIMIT_LOGIN: "10/minute"
+  RATE_LIMIT_DEFAULT: "60/minute"
 
-namespace: solarwatch
+readinessProbe:
+  path: /health
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 6
+  successThreshold: 1
 
-ingress:
-  enabled: true
-  className: "nginx"
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-  host: solarwatch.your-domain.com
-  tls:
-    - secretName: solarwatch-tls
-      hosts:
-        - solarwatch.your-domain.com
+livenessProbe:
+  path: /health
+  initialDelaySeconds: 30
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 6
 
 resources:
   requests:
@@ -50,3 +73,21 @@ resources:
   limits:
     cpu: "1"
     memory: 1Gi
+
+collectorResources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+service:
+  port: 80
+  targetPort: 8000
+
+# Cloudflare Tunnel is used for ingress — no K8s Ingress needed.
+# Point your Cloudflare tunnel config to:
+#   http://solarwatch.<namespace>.svc.cluster.local:80
+ingress:
+  enabled: false

@@ -1,0 +1,14 @@
+{{/*
+Namespace is created manually before deploying — matching WTS pattern.
+Create with:
+  kubectl create namespace solarwatch
+
+Uncomment below to have Helm manage the namespace (not recommended —
+Helm will delete the namespace and all resources on helm uninstall).
+*/}}
+{{/*
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+*/}}

@@ -1,9 +1,9 @@
 apiVersion: v2
 name: solarwatch
-description: Multi-site solar inverter monitoring platform
+description: Multi-site solar inverter monitoring — web app + collector
 type: application
-# version = Helm chart version (bump when chart templates change)
-# appVersion = app code version (must match VERSION file and Docker image tag)
+# version: Helm chart version — bump when chart templates change
+# appVersion: app code version — must match VERSION file and Docker image tag
 version: 1.0.0
 appVersion: "1.0.0"
 keywords:
