@@ -379,9 +379,12 @@ class VictronCollector:
             "pv2_power":    None,
 
             # Battery
+            # VenusOS sign convention: positive=charging, negative=discharging
+            # Dashboard convention:    negative=charging, positive=discharging
+            # Negate both so the dashboard arrows and labels display correctly.
             "battery_voltage":  batt_v,
-            "battery_current":  self._avg("battery_current"),
-            "battery_power":    self._avg("battery_power"),
+            "battery_current":  -self._avg("battery_current") if self._avg("battery_current") is not None else None,
+            "battery_power":    -self._avg("battery_power")   if self._avg("battery_power")   is not None else None,
             "battery_soc":      self._avg("battery_soc"),
             "battery_temp":     self._avg("battery_temp"),
 
