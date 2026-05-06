@@ -1,4 +1,6 @@
 # ── solarwatch.service ────────────────────────────────────────────────────────
+# DEPRECATED — use solarwatch-collector.service instead.
+# Kept for backwards compatibility with existing installations.
 # Systemd unit for the SolarWatch inverter collector.
 # Install: sudo cp solarwatch.service /etc/systemd/system/
 #          sudo systemctl daemon-reload

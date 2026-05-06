@@ -124,18 +124,30 @@ pip install -r requirements.txt
 
 ### 6. Start the web app
 
-**Development (hot reload):**
+**Development — PyCharm or terminal (hot reload):**
+
+Create two run configurations in PyCharm (or two terminal tabs):
+
 ```bash
+# Run configuration 1 — Web app
 python run.py
-# Visit http://localhost:8000
+# → http://localhost:8000  (auto-reloads on code changes)
+
+# Run configuration 2 — Collector
+python collector.py
+# → polls every 60s, writes to DB
 ```
+
+Both read the same `.env` file automatically. No other config needed.
 
 **Production (gunicorn + uvicorn):**
 ```bash
 gunicorn main:app \
   --worker-class uvicorn.workers.UvicornWorker \
   --workers 2 \
-  --bind 0.0.0.0:8000
+  --bind 0.0.0.0:8000 \
+  --timeout 60 \
+  --graceful-timeout 30
 ```
 
 ### 7. First login
@@ -156,14 +168,21 @@ Go to **Sites** (admin) and verify your sites are configured correctly:
 python collector.py
 ```
 
-Or as a systemd service:
+Or as systemd services (recommended for bare-metal):
 ```bash
-sudo cp solarwatch.service /etc/systemd/system/
-sudo systemctl enable --now solarwatch
+# Collector
+sudo cp solarwatch-collector.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solarwatch-collector
+
+# Web app (when ready to switch from the old powerflow server)
+sudo cp solarwatch-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solarwatch-web
 ```
 
-The collector polls every 60 seconds by default (`POLL_INTERVAL=60`).
-Config changes in the web UI are picked up on the next config reload (every 5 minutes).
+The collector polls every 60 seconds (`POLL_INTERVAL=60`).
+Config changes in the web UI are picked up every 5 minutes — no restart needed.
 
 ---
 
@@ -646,20 +665,26 @@ WEATHER_INTERVAL=900
 Note: The collector does not need `SECRET_KEY`, `APP_ADMIN_*`, or any web app
 settings — it only reads the DB connection variables.
 
-**5. Install and start the collector service**
+**5. Install and start the services**
 ```bash
-sudo cp /opt/solarwatch/solarwatch.service /etc/systemd/system/
+# Collector
+sudo cp /opt/solarwatch/solarwatch-collector.service /etc/systemd/system/
+# Web app
+sudo cp /opt/solarwatch/solarwatch-web.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now solarwatch
+
+# Start collector first (web app works without it but won't have live data)
+sudo systemctl enable --now solarwatch-collector
+# Start web app
+sudo systemctl enable --now solarwatch-web
 ```
 
-**6. Check it's running**
+**6. Check everything is running**
 ```bash
-sudo systemctl status solarwatch
-sudo journalctl -u solarwatch -f
+sudo systemctl status solarwatch-collector solarwatch-web
 ```
 
-Expected startup output:
+Expected collector startup:
 ```
 SolarWatch Collector starting
 DB              : postgres-ha.../solarwatch
@@ -672,17 +697,23 @@ Sites loaded:
 
 **Useful commands**
 ```bash
-# Live logs
-sudo journalctl -u solarwatch -f
+# Live collector logs
+sudo journalctl -u solarwatch-collector -f
 
-# Restart after .env or code changes
-sudo systemctl restart solarwatch
+# Live web app logs
+sudo journalctl -u solarwatch-web -f
 
-# Check last 50 log lines
-sudo journalctl -u solarwatch -n 50 --no-pager
+# Restart after .env changes or code updates
+sudo systemctl restart solarwatch-collector
+sudo systemctl restart solarwatch-web
 
-# Stop collector without disabling
-sudo systemctl stop solarwatch
+# Last 50 lines
+sudo journalctl -u solarwatch-collector -n 50 --no-pager
+sudo journalctl -u solarwatch-web -n 50 --no-pager
+
+# Stop without disabling (survives reboot)
+sudo systemctl stop solarwatch-collector
+sudo systemctl stop solarwatch-web
 ```
 
 **Running collector alongside an existing web server**
@@ -693,18 +724,13 @@ dashboard or web server with no conflicts. They share only the database.
 
 To replace the old collector:
 ```bash
-# Pull the latest code
-sudo -u solarwatch git -C /opt/solarwatch pull
+# Stop and disable the old collector (adjust name if different on your server)
+sudo systemctl stop solarwatch
+sudo systemctl disable solarwatch
 
-# Install any new dependencies
-sudo -u solarwatch /opt/solarwatch/venv/bin/pip install -r /opt/solarwatch/requirements.txt
-
-# Stop and disable the old collector service (use whatever the old service is named)
-sudo systemctl stop solarwatch-old
-sudo systemctl disable solarwatch-old
-
-# Start the new one
-sudo systemctl enable --now solarwatch
+# The new collector runs as solarwatch-collector (separate service, separate directory)
+# It's already running if you followed the steps above
+sudo systemctl status solarwatch-collector
 ```
 
 The collector reloads site configuration from the database every 5 minutes
@@ -763,8 +789,8 @@ sudo -u solarwatch /opt/solarwatch/venv/bin/pip install -r /opt/solarwatch/requi
 # psql -h your-postgres-host -U postgres -d solarwatch -f /opt/solarwatch/migrate_xyz.sql
 
 # Restart services
-sudo systemctl restart solarwatch          # collector
-sudo systemctl restart solarwatch-powerflow  # web app (if running)
+sudo systemctl restart solarwatch-collector
+sudo systemctl restart solarwatch-web
 ```
 
 ### Kubernetes
