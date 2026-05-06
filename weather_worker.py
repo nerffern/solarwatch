@@ -94,14 +94,17 @@ def fetch(site_name: str, latitude: float, longitude: float) -> Optional[dict]:
         daily = data.get("daily", {})
 
         def _f(key) -> Optional[float]:
+            """Safely convert a value to float, returning 0.0 on None or error."""
             v = cur.get(key)
             return float(v) if v is not None else None
 
         def _i(key) -> Optional[int]:
+            """Safely convert a value to int, returning 0 on None or error."""
             v = cur.get(key)
             return int(v) if v is not None else None
 
         def _ts(iso: Optional[str]) -> Optional[datetime]:
+            """Convert an ISO-8601 datetime string to a timezone-aware UTC datetime object."""
             if not iso:
                 return None
             try:

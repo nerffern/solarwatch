@@ -24,6 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class StartupStep:
+    """Named startup check — a label and a callable that returns a list of error strings."""
     name: str
     handler: Callable[[], List[str]]
 
@@ -53,6 +54,7 @@ def _validate_required_env_vars() -> List[str]:
 
 
 def _verify_database_connectivity() -> List[str]:
+    """Verify the database is reachable and accepting connections before any other startup step runs."""
     try:
         with get_connection() as conn:
             conn.execute(text("SELECT 1"))
@@ -147,6 +149,7 @@ def _ensure_foundational_tables() -> List[str]:
 
 
 def _ensure_system_roles() -> List[str]:
+    """Seed the four system roles (admin, site_admin, site_viewer, user) if they do not exist."""
     try:
         with get_connection() as conn:
             for role_name, description in (
@@ -176,6 +179,7 @@ def _ensure_system_roles() -> List[str]:
 
 
 def _ensure_admin_user() -> List[str]:
+    """Create or update the bootstrap admin account from APP_ADMIN_USERNAME / APP_ADMIN_PASSWORD env vars."""
     username = os.getenv("APP_ADMIN_USERNAME")
     password = os.getenv("APP_ADMIN_PASSWORD")
     if not username or not password:

@@ -48,6 +48,7 @@ _cache: dict[str, tuple[float, Any]] = {}
 
 
 def _cache_get(key: str, ttl: float) -> Optional[Any]:
+    """Return cached value if it exists and has not expired. Returns None on miss or expiry."""
     entry = _cache.get(key)
     if entry and (time.monotonic() - entry[0]) < ttl:
         return entry[1]
@@ -55,6 +56,7 @@ def _cache_get(key: str, ttl: float) -> Optional[Any]:
 
 
 def _cache_set(key: str, value: Any) -> None:
+    """Store value in the in-memory TTL cache with the current timestamp."""
     _cache[key] = (time.monotonic(), value)
 
 
@@ -81,6 +83,7 @@ def _query_all(sql: str, params: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _get_sites() -> list[dict]:
+    """Return the list of site names accessible to the current user. Cached 10s."""
     rows = _query_all(
         "SELECT site_name, display_name FROM sites WHERE enabled = TRUE ORDER BY display_name",
         {},
@@ -102,6 +105,7 @@ def _resolve_site(site: Optional[str], accessible: list[str]) -> Optional[str]:
 
 
 def _get_flow(site: str) -> dict:
+    """Return latest power flow reading: solar, battery, grid, load. Cached 10s."""
     key = f"flow:{site}"
     cached = _cache_get(key, ttl=10)
     if cached is not None:
@@ -208,6 +212,7 @@ def _get_flow(site: str) -> dict:
 
 
 def _get_monthly(site: str) -> dict:
+    """Return month-to-date PV generation and grid import totals for a site. Cached 120s."""
     key = f"monthly:{site}"
     cached = _cache_get(key, ttl=120)
     if cached is not None:
@@ -276,6 +281,7 @@ _WMO = {
 
 
 def _get_weather(site: str) -> dict:
+    """Return the most recent weather reading for a site. Cached 90s."""
     key = f"weather:{site}"
     cached = _cache_get(key, ttl=90)
     if cached is not None:
@@ -316,6 +322,7 @@ def _get_weather(site: str) -> dict:
 
 
 def _get_chart(chart: str, site: str) -> Any:
+    """Return time-series chart data for a given chart type and site. Cached 120s."""
     key = f"chart:{chart}:{site}"
     cached = _cache_get(key, ttl=120)
     if cached is not None:

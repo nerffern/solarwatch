@@ -212,8 +212,7 @@ Config changes in the web UI are picked up every 5 minutes — no restart needed
 | `RETRY_DELAY` | — | `5` | Seconds between retries |
 | `CONFIG_RELOAD` | — | `300` | Seconds between site config reloads from DB |
 | `WEATHER_INTERVAL` | — | `900` | Weather poll interval in seconds (15 min) |
-| `VICTRON_MQTT_HOST` | — | — | Cerbo GX IP address for Victron sites (fallback if not set in inverter config) |
-| `VICTRON_MQTT_PORT` | — | `1883` | Victron MQTT broker port |
+| `VICTRON_MQTT_PORT` | — | `1883` | Victron MQTT broker port — only set if your Cerbo GX uses a non-standard port. The IP address for each Victron site is configured in the web UI (Sites → Edit → Add device). |
 
 > **Note:** The collector uses the same `DATABASE_URL` or `DB_*` variables as
 > the web app. There are no separate `PG_*` variables — one `.env` file covers both.

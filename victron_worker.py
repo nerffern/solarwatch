@@ -29,7 +29,7 @@ Inverter config (sites.inverters JSONB — set via web UI):
     "mqtt_port": 1883           (optional, default 1883)
   }
 
-Fallback: if inverters list is empty, reads VICTRON_MQTT_HOST from environment.
+The Cerbo GX IP is configured per site in the web UI (Sites → Edit → Add device).
 
 Dependencies:
   pip install paho-mqtt
@@ -70,6 +70,7 @@ class VictronCollector:
     """
 
     def __init__(self, host: str, port: int):
+        """Initialise the collector with the Cerbo GX host and port. Sets up empty accumulators for all data channels."""
         self.host = host
         self.port = port
 
@@ -99,6 +100,7 @@ class VictronCollector:
         return vals[-1] if vals else None
 
     def _avg(self, key: str) -> Optional[float]:
+        """Return the average of all accumulated readings for a key, rounded to 3 decimal places. Returns None if no readings."""
         vals = self._raw.get(key)
         if not vals:
             return None
@@ -107,6 +109,7 @@ class VictronCollector:
     # ── MQTT callbacks ────────────────────────────────────────────────────────
 
     def _on_connect(self, client, userdata, flags, rc):
+        """MQTT on_connect callback — subscribe to the Serial topic to discover the Cerbo GX portal ID."""
         if rc != 0:
             log.error(f"[victron/{self.host}] MQTT connect failed rc={rc}")
             return
@@ -117,6 +120,7 @@ class VictronCollector:
         self._connected.set()
 
     def _on_message(self, client, userdata, msg):
+        """MQTT on_message callback — route incoming topic messages to the correct handler based on VenusOS service type."""
         topic = msg.topic
         try:
             payload = json.loads(msg.payload.decode())
@@ -274,6 +278,7 @@ class VictronCollector:
     # ── Collect and return ────────────────────────────────────────────────────
 
     def collect(self) -> Optional[dict]:
+        """Connect to the Cerbo GX, send keepalive, collect all power topics for COLLECT_SECONDS, disconnect, and return the assembled reading dict."""
         if not MQTT_AVAILABLE:
             return None
 
@@ -445,13 +450,13 @@ def poll(inv: dict, site_name: str = "unknown") -> Optional[dict]:
 
     label     = f"{site_name}/{inv.get('name', 'victron')}"
     # Accept mqtt_host (new) or ip (legacy — stored before mqtt_host field was introduced)
-    mqtt_host = str(inv.get("mqtt_host") or inv.get("ip") or os.getenv("VICTRON_MQTT_HOST", "")).strip()
-    mqtt_port = int(inv.get("mqtt_port") or os.getenv("VICTRON_MQTT_PORT", "1883"))
+    mqtt_host = str(inv.get("mqtt_host") or inv.get("ip") or "").strip()
+    mqtt_port = int(inv.get("mqtt_port") or 1883)
 
     if not mqtt_host:
         log.error(
             f"[{label}] No MQTT host configured. "
-            f"Set mqtt_host in the inverter config or VICTRON_MQTT_HOST env var."
+            f"Set the Cerbo GX IP address via the web UI: Sites → Edit → Add device."
         )
         return None
 

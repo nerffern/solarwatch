@@ -15,6 +15,7 @@ class BaseConfig:
     # SECRET_KEY signs session cookies. Must be stable across all pod
     # replicas and restarts so sessions survive a pod reschedule or a
     # rolling deploy. Store it as a K8s Secret and mount it as an env var.
+    """Base configuration shared by all environments. Sets secure defaults that subclasses can override."""
     SECRET_KEY: str = field(default_factory=lambda: os.getenv("SECRET_KEY", "change-me"))
 
     # Session cookie settings (used by Starlette's SessionMiddleware).
@@ -39,6 +40,7 @@ class BaseConfig:
 
 @dataclass(frozen=True)
 class DevelopmentConfig(BaseConfig):
+    """Development config — debug mode, relaxed CSP, HTTP cookies."""
     DEBUG: bool = True
     # Relaxed CSP for local dev — allows inline scripts so hot-reload tools work.
     CSP_REPORT_ONLY: bool = True
@@ -49,6 +51,7 @@ class DevelopmentConfig(BaseConfig):
 
 @dataclass(frozen=True)
 class ProductionConfig(BaseConfig):
+    """Production config — strict CSP, HSTS, HTTPS-only cookies."""
     DEBUG: bool = False
     # Strict CSP in production.
     CSP_REPORT_ONLY: bool = False

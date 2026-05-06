@@ -35,6 +35,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _load_dotenv_if_available() -> bool:
+    """Load .env file if present (dev only). Returns True if loaded, False if not found. Silent in production."""
     if importlib.util.find_spec("dotenv") is None:
         return False
     load_dotenv = importlib.import_module("dotenv").load_dotenv
@@ -42,6 +43,7 @@ def _load_dotenv_if_available() -> bool:
 
 
 def _build_csp(config) -> str:
+    """Build the Content-Security-Policy header string based on the current environment. Stricter in production."""
     allow_inline = getattr(config, "CSP_ALLOW_INLINE_SCRIPTS", False)
     script_src = "'self'" + (" 'unsafe-inline'" if allow_inline else "")
     return (
@@ -60,6 +62,7 @@ def _build_csp(config) -> str:
 
 def create_app() -> FastAPI:
     # Read version from VERSION file — used in templates and /api/version
+    """Application factory — create and configure the FastAPI app. Reads VERSION, loads config, registers middleware, mounts routers, runs startup checks."""
     _version_file = pathlib.Path(__file__).parent.parent / "VERSION"
     APP_VERSION = _version_file.read_text().strip() if _version_file.exists() else "dev"
 
@@ -77,6 +80,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """FastAPI lifespan context manager — runs startup checks once on boot. Logs any failures but does not prevent startup."""
         errors = run_startup_checks()
         startup_errors.extend(errors)
         if errors:
@@ -138,6 +142,7 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        """Middleware — add security headers (CSP, X-Frame-Options, HSTS etc.) to every response."""
         response = await call_next(request)
         if report_only:
             response.headers["Content-Security-Policy-Report-Only"] = csp
@@ -159,6 +164,7 @@ def create_app() -> FastAPI:
     # ---------------------------------------------------------------------------
     @app.middleware("http")
     async def startup_guard(request: Request, call_next):
+        """HTTP middleware — if startup checks found errors, return a 503 error page for every request except /health."""
         if startup_errors and request.url.path != "/health":
             from app.templates_global import templates as _t
             return _t.TemplateResponse(
@@ -186,6 +192,7 @@ def create_app() -> FastAPI:
     # ---------------------------------------------------------------------------
     @app.exception_handler(_RedirectException)
     async def redirect_exception_handler(request: Request, exc: _RedirectException):
+        """Convert internal _RedirectException to an HTTP 303 redirect response."""
         return RedirectResponse(url=exc.url, status_code=exc.status_code)
 
     # APP_VERSION is injected at import time in app/templates_global.py

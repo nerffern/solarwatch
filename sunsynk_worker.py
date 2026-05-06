@@ -48,6 +48,7 @@ class SunsynkClient:
     """Authenticated Sunsynk API client with automatic token refresh."""
 
     def __init__(self, username: str, password: str):
+        """Initialise the client with Sunsynk cloud credentials. Does not log in immediately — login is deferred to first use."""
         self.username      = username
         self.password      = password
         self.token: Optional[str] = None
@@ -62,13 +63,16 @@ class SunsynkClient:
 
     @staticmethod
     def _md5(s: str) -> str:
+        """Return the MD5 hex digest of a string. Used for password hashing in the Sunsynk auth flow."""
         return hashlib.md5(s.encode()).hexdigest()
 
     @staticmethod
     def _nonce() -> int:
+        """Generate a random 32-character alphanumeric nonce for request signing."""
         return int(time.time() * 1000)
 
     def _get_public_key(self) -> str:
+        """Fetch the RSA public key from the Sunsynk auth server. Cached on the instance after first fetch."""
         nonce = self._nonce()
         sign  = self._md5(f"{nonce}{SOURCE}")
         r = self.session.get(
@@ -80,11 +84,13 @@ class SunsynkClient:
         return r.json()["data"]
 
     def _encrypt_password(self, rsa_b64: str) -> str:
+        """Encrypt the password with the Sunsynk RSA public key for the login request body."""
         key    = RSA.import_key(base64.b64decode(rsa_b64))
         cipher = PKCS1_v1_5.new(key)
         return base64.b64encode(cipher.encrypt(self.password.encode())).decode()
 
     def ensure_logged_in(self, force: bool = False) -> bool:
+        """Log in to the Sunsynk cloud API if not already authenticated, or if force=True. Stores the Bearer token for subsequent requests."""
         if not force and self.token and time.time() < self._token_expiry:
             return True
         log.info(f"Logging in to Sunsynk Cloud (force={force})...")
@@ -119,6 +125,7 @@ class SunsynkClient:
             return False
 
     def _get(self, endpoint: str, _retry: bool = True) -> Optional[dict]:
+        """Make an authenticated GET request to the Sunsynk API. Re-authenticates on 401. Returns the response JSON."""
         r = self.session.get(
             f"{BASE_URL}/api/{endpoint}",
             headers={"Authorization": f"Bearer {self.token}"},
@@ -139,10 +146,12 @@ class SunsynkClient:
         return data
 
     def get_plants(self) -> list:
+        """Return the list of plants (solar installations) associated with this Sunsynk account."""
         data = self._get("v1/plants?page=1&limit=20")
         return (data or {}).get("infos", [])
 
     def get_plant_realtime(self, plant_id) -> Optional[dict]:
+        """Return the latest real-time power flow data for a given plant ID."""
         return self._get(f"v1/plant/{plant_id}/realtime")
 
     def get_inverter_flow(self, sn: str) -> Optional[dict]:
@@ -175,6 +184,7 @@ class SunsynkClient:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         def last_val(col):
+            """Extract the most recent numeric value from a Sunsynk time-series list, or 0 if the list is empty."""
             data = self._get(f"v1/inverter/{sn}/output/day?lan=en&date={today}&column={col}")
             if not data:
                 return None
@@ -219,6 +229,7 @@ class SunsynkClient:
 
 
 def _f(val) -> Optional[float]:
+    """Format a float value to 1 decimal place, returning 0.0 for None or invalid input."""
     if val is None:
         return None
     try:

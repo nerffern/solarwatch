@@ -28,6 +28,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from app.auth import _admin_password_matches, login_required, require_role
@@ -36,14 +37,16 @@ from app.routers.auth import _consume_flash
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/sites", tags=["sites"])
-from app.templates_global import templates
+templates = Jinja2Templates(directory="app/templates")
 
 
 def _flash(request: Request, category: str, message: str) -> None:
+    """Store a flash message (category + text) in the session for the next page load."""
     request.session["flash"] = (category, message)
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
+    """Render a Jinja2 template with request context, current user, flash message, and any extra kwargs."""
     ctx["request"] = request
     ctx["flash"] = _consume_flash(request)
     ctx.setdefault("current_user", None)
@@ -55,6 +58,7 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 def _fetch_all_sites() -> list[dict]:
+    """Return all sites from the DB ordered by display name. Used by the admin sites list page."""
     with get_connection() as conn:
         rows = conn.execute(
             text(
@@ -72,6 +76,7 @@ def _fetch_all_sites() -> list[dict]:
 
 
 def _fetch_site(site_id: int) -> Optional[dict]:
+    """Return a single site row by integer ID, or None if not found."""
     with get_connection() as conn:
         row = conn.execute(
             text(
@@ -150,6 +155,7 @@ async def sites_list(request: Request, user=Depends(require_role("admin"))):
 
 @router.get("/new", response_class=HTMLResponse)
 async def sites_new_form(request: Request, user=Depends(require_role("admin"))):
+    """GET /sites/new — render the new site creation form."""
     return _render(request, "sites/form.html", site=None, current_user=user,
                    mode="create")
 
@@ -166,6 +172,7 @@ async def sites_new_post(
     longitude: str = Form(""),
     enabled: Optional[str] = Form(None),
 ):
+    """POST /sites/new — validate inputs, create the site row, redirect to its edit page."""
     site_name = site_name.strip()
     display_name = display_name.strip()
 
@@ -173,8 +180,8 @@ async def sites_new_post(
         _flash(request, "danger", "Site name and display name are required.")
         return RedirectResponse(url="/sites/new", status_code=303)
 
-    if source_type not in ("deye", "sunsynk", "victron", "sungrow"):
-        _flash(request, "danger", "Source type must be deye, sunsynk, victron, or sungrow.")
+    if source_type not in ("deye", "sunsynk"):
+        _flash(request, "danger", "Source type must be deye or sunsynk.")
         return RedirectResponse(url="/sites/new", status_code=303)
 
     lat = float(latitude) if latitude.strip() else None
@@ -196,7 +203,7 @@ async def sites_new_post(
                                        location, latitude, longitude, enabled, inverters)
                     VALUES (:site_name, :display_name, :source_type,
                             :location, :latitude, :longitude, :enabled,
-                            CAST(:inverters AS jsonb))
+                            :inverters::jsonb)
                     RETURNING id
                     """
                 ),
@@ -208,7 +215,7 @@ async def sites_new_post(
                     "latitude": lat,
                     "longitude": lon,
                     "enabled": enabled == "on",
-                    "inverters": "[]" if source_type in ("deye", "victron", "sungrow") else None,
+                    "inverters": "[]" if source_type == "deye" else None,
                 },
             )
             new_id = result.fetchone()[0]
@@ -228,6 +235,7 @@ async def sites_new_post(
 async def sites_edit_form(
     site_id: int, request: Request, user=Depends(require_role("admin"))
 ):
+    """GET /sites/{id}/edit — render the edit form with current config, inverters, user access, and share link."""
     site = _fetch_site(site_id)
     if not site:
         _flash(request, "danger", "Site not found.")
@@ -274,6 +282,7 @@ async def sites_edit_post(
     sunsynk_password: str = Form(""),
     sunsynk_plant_id: str = Form(""),
 ):
+    """POST /sites/{id}/edit — save site detail changes (display name, location, coordinates, enabled)."""
     site = _fetch_site(site_id)
     if not site:
         _flash(request, "danger", "Site not found.")
@@ -367,6 +376,7 @@ async def sites_edit_post(
 async def sites_toggle(
     site_id: int, request: Request, user=Depends(require_role("admin"))
 ):
+    """POST /sites/{id}/toggle — enable or disable a site. Disabled sites are skipped by the collector and hidden from the dashboard."""
     with get_connection() as conn:
         site = conn.execute(
             text("SELECT enabled FROM sites WHERE id = :id"), {"id": site_id}
@@ -393,6 +403,7 @@ async def sites_delete(
     user=Depends(require_role("admin")),
     admin_password: str = Form(""),
 ):
+    """POST /sites/{id}/delete — delete the site and its user assignments. Solar readings are preserved."""
     if not admin_password or not _admin_password_matches(user, admin_password):
         _flash(request, "danger", "Admin password confirmation failed.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
@@ -425,9 +436,10 @@ async def inverters_add(
     dongle_serial: str = Form(""),
     inverter_sn: str = Form(""),
 ):
+    """POST /sites/{id}/inverters/add — append an inverter entry to the site JSONB inverters list."""
     site = _fetch_site(site_id)
-    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
-        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
+    if not site or site["source_type"] != "deye":
+        _flash(request, "danger", "Site not found or not a Deye site.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     if not inv_name.strip() or not inv_ip.strip():
@@ -437,21 +449,16 @@ async def inverters_add(
     try:
         raw = site["inverters"]
         inverters = raw if isinstance(raw, list) else (json.loads(raw) if raw else [])
-        inv_entry = {"name": inv_name.strip()}
-        if site["source_type"] == "victron":
-            # Victron: inv_ip field holds the Cerbo GX MQTT host
-            inv_entry["mqtt_host"] = inv_ip.strip()
-            inv_entry["mqtt_port"] = 1883
-        else:
-            # Deye / Sungrow: standard Modbus fields
-            inv_entry["ip"] = inv_ip.strip()
-            inv_entry["dongle_serial"] = int(dongle_serial) if dongle_serial.strip() else 0
-            inv_entry["inverter_sn"] = inverter_sn.strip()
-        inverters.append(inv_entry)
+        inverters.append({
+            "name": inv_name.strip(),
+            "ip": inv_ip.strip(),
+            "dongle_serial": int(dongle_serial) if dongle_serial.strip() else 0,
+            "inverter_sn": inverter_sn.strip(),
+        })
         with get_connection() as conn:
             conn.execute(
                 text(
-                    "UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"
+                    "UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"
                 ),
                 {"inv": json.dumps(inverters), "id": site_id},
             )
@@ -459,8 +466,7 @@ async def inverters_add(
         _flash(request, "danger", f"Failed to add inverter: {e}")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
-    label = 'Cerbo GX' if site['source_type'] == 'victron' else 'Inverter'
-    _flash(request, "success", f"{label} '{inv_name}' added.")
+    _flash(request, "success", f"Inverter '{inv_name}' added.")
     return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
 
@@ -472,13 +478,14 @@ async def inverters_delete(
     user=Depends(require_role("admin")),
     admin_password: str = Form(""),
 ):
+    """POST /sites/{id}/inverters/{idx}/delete — remove an inverter entry from the JSONB list by index."""
     if not admin_password or not _admin_password_matches(user, admin_password):
         _flash(request, "danger", "Admin password confirmation failed.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     site = _fetch_site(site_id)
-    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
-        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
+    if not site or site["source_type"] != "deye":
+        _flash(request, "danger", "Site not found or not a Deye site.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     try:
@@ -492,7 +499,7 @@ async def inverters_delete(
         with get_connection() as conn:
             conn.execute(
                 text(
-                    "UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"
+                    "UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"
                 ),
                 {"inv": json.dumps(inverters), "id": site_id},
             )

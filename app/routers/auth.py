@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -26,7 +27,7 @@ from app.auth import (
 from app.db import get_connection
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-from app.templates_global import templates
+templates = Jinja2Templates(directory="app/templates")
 
 
 def _flash(request: Request, category: str, message: str) -> None:
@@ -54,6 +55,7 @@ def _render(request: Request, template: str, **ctx) -> HTMLResponse:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    """GET /auth/login — render the login form. Redirects to dashboard if already logged in."""
     return _render(request, "auth/login.html")
 
 
@@ -63,6 +65,7 @@ async def login_post(
     username: str = Form(""),
     password: str = Form(""),
 ):
+    """POST /auth/login — validate credentials, create session, redirect. Rate limited 10/min per IP."""
     user = _fetch_user_by_username(username.strip())
     if not user or not user["enabled"] or not user["role_enabled"]:
         _flash(request, "danger", "Invalid credentials or disabled account.")
@@ -88,12 +91,14 @@ async def login_post(
 
 @router.get("/logout")
 async def logout(request: Request, user=Depends(login_required)):
+    """POST /auth/logout — destroy the current session and redirect to login."""
     request.session.clear()
     return RedirectResponse(url="/auth/login", status_code=303)
 
 
 @router.get("/change-password", response_class=HTMLResponse)
 async def change_password_page(request: Request, user=Depends(login_required)):
+    """GET /auth/change-password — render the forced password change form (shown on first login)."""
     return _render(request, "auth/change_password.html")
 
 
@@ -104,6 +109,7 @@ async def change_password_post(
     current_password: str = Form(""),
     new_password: str = Form(""),
 ):
+    """POST /auth/change-password — validate and save new password, clear the must_change flag."""
     if not _is_password_strong(new_password):
         _flash(request, "danger", "Password must be at least 8 characters and include letters and numbers.")
         return _render(request, "auth/change_password.html")
@@ -135,6 +141,7 @@ async def change_password_post(
 
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, user=Depends(require_role("admin"))):
+    """GET /auth/admin — admin console home page with quick links to users, roles, sites, and API docs."""
     return _render(request, "auth/admin/dashboard.html")
 
 
@@ -144,6 +151,7 @@ async def admin_dashboard(request: Request, user=Depends(require_role("admin")))
 
 @router.get("/admin/users", response_class=HTMLResponse)
 async def admin_users(request: Request, user=Depends(require_role("admin"))):
+    """GET /auth/admin/users — list all user accounts with role, status, created date, and actions."""
     with get_connection() as conn:
         users = (
             conn.execute(
@@ -177,6 +185,7 @@ async def admin_users_create(
     role_id: int = Form(...),
     enabled: Optional[str] = Form(None),
 ):
+    """POST /auth/admin/users/create — create a new user with username, password, and role."""
     username = username.strip()
     is_enabled = enabled == "on"
 
@@ -225,6 +234,7 @@ async def admin_users_create(
 async def admin_users_toggle(
     user_id: int, request: Request, user=Depends(require_role("admin"))
 ):
+    """POST /auth/admin/users/{id}/toggle — enable or disable a user account."""
     with get_connection() as conn:
         target = conn.execute(
             text("SELECT enabled FROM web_users WHERE id = :id"), {"id": user_id}
@@ -247,6 +257,7 @@ async def admin_users_role(
     user=Depends(require_role("admin")),
     role_id: int = Form(...),
 ):
+    """POST /auth/admin/users/{id}/role — change a user's role. Cannot demote your own admin account."""
     if user["id"] == user_id:
         with get_connection() as conn:
             role = conn.execute(
@@ -278,6 +289,7 @@ async def admin_users_password(
     user=Depends(require_role("admin")),
     password: str = Form(""),
 ):
+    """POST /auth/admin/users/{id}/password — reset a user's password. Requires admin's own password for confirmation."""
     if not _is_password_strong(password):
         _flash(request, "danger", "Password must be at least 8 characters and include letters and numbers.")
         return RedirectResponse(url="/auth/admin/users", status_code=303)
@@ -297,6 +309,7 @@ async def admin_users_delete(
     user=Depends(require_role("admin")),
     admin_password: str = Form(""),
 ):
+    """POST /auth/admin/users/{id}/delete — permanently delete a user. Requires admin's own password."""
     if user["id"] == user_id:
         _flash(request, "danger", "You cannot delete your own account.")
         return RedirectResponse(url="/auth/admin/users", status_code=303)
@@ -323,6 +336,7 @@ async def admin_users_delete(
 
 @router.get("/admin/roles", response_class=HTMLResponse)
 async def admin_roles(request: Request, user=Depends(require_role("admin"))):
+    """GET /auth/admin/roles — list all system and custom roles."""
     return _render(request, "auth/admin/roles.html", roles=_fetch_roles())
 
 
@@ -333,6 +347,7 @@ async def admin_roles_create(
     name: str = Form(""),
     description: str = Form(""),
 ):
+    """POST /auth/admin/roles/create — create a new custom role."""
     name = name.strip().lower()
     if not name:
         _flash(request, "danger", "Role name is required.")
@@ -360,6 +375,7 @@ async def admin_roles_edit(
     user=Depends(require_role("admin")),
     description: str = Form(""),
 ):
+    """POST /auth/admin/roles/{id}/edit — update a role's description. System roles cannot be renamed."""
     with get_connection() as conn:
         conn.execute(
             text("UPDATE roles SET description = :d WHERE id = :id"),
@@ -373,6 +389,7 @@ async def admin_roles_edit(
 async def admin_roles_toggle(
     role_id: int, request: Request, user=Depends(require_role("admin"))
 ):
+    """POST /auth/admin/roles/{id}/toggle — enable or disable a role. System roles cannot be disabled."""
     with get_connection() as conn:
         role = conn.execute(
             text("SELECT enabled, is_system FROM roles WHERE id = :id"), {"id": role_id}
@@ -398,6 +415,7 @@ async def admin_roles_delete(
     user=Depends(require_role("admin")),
     admin_password: str = Form(""),
 ):
+    """POST /auth/admin/roles/{id}/delete — delete a custom role. System roles are protected."""
     if not admin_password or not _admin_password_matches(user, admin_password):
         _flash(request, "danger", "Admin password confirmation failed.")
         return RedirectResponse(url="/auth/admin/roles", status_code=303)

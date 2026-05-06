@@ -32,6 +32,7 @@ from app.db import get_connection
 # ---------------------------------------------------------------------------
 
 def _fetch_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """Fetch a web_users row by username. Returns None if not found."""
     with get_connection() as conn:
         return (
             conn.execute(
@@ -59,6 +60,7 @@ def _fetch_user_by_username(username: str) -> Optional[Dict[str, Any]]:
 
 
 def _fetch_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    """Fetch a web_users row by user ID. Returns None if not found."""
     with get_connection() as conn:
         return (
             conn.execute(
@@ -85,6 +87,7 @@ def _fetch_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
 
 
 def _fetch_user_password_hash(user_id: int) -> Optional[str]:
+    """Return the stored password hash for a user. Used only for password verification."""
     with get_connection() as conn:
         result = conn.execute(
             text("SELECT password FROM web_users WHERE id = :user_id"),
@@ -94,6 +97,7 @@ def _fetch_user_password_hash(user_id: int) -> Optional[str]:
 
 
 def _fetch_roles() -> list:
+    """Return all roles from the roles table as a list of dicts."""
     with get_connection() as conn:
         return (
             conn.execute(
@@ -111,12 +115,14 @@ def _fetch_roles() -> list:
 
 
 def _is_password_strong(password: str) -> bool:
+    """Return True if the password meets minimum strength requirements (8+ chars, mixed case, digit)."""
     if len(password) < 8:
         return False
     return any(c.isalpha() for c in password) and any(c.isdigit() for c in password)
 
 
 def _admin_password_matches(current_user: Dict[str, Any], password: str) -> bool:
+    """Verify that the supplied password matches the currently logged-in admin's hash. Used for sensitive actions like delete and password reset."""
     pw_hash = _fetch_user_password_hash(int(current_user["id"]))
     if not pw_hash:
         return False
@@ -192,6 +198,7 @@ def require_role(*role_names: str) -> Callable:
     """
 
     def guard(request: Request, user=Depends(login_required)):
+        """FastAPI dependency — raises a redirect to login if the user is not authenticated or lacks the required role."""
         if user["role_name"] not in role_names:
             request.session["flash"] = (
                 "danger",
@@ -211,6 +218,7 @@ class _RedirectException(Exception):
     on the app. This exception is caught in create_app() in app/__init__.py.
     """
     def __init__(self, url: str, status_code: int = 303):
+        """Initialise the AccessDenied exception with the URL to redirect to."""
         self.url = url
         self.status_code = status_code
 

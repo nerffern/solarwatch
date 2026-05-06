@@ -24,6 +24,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 
 from app.auth import get_accessible_sites, login_required, require_role
@@ -33,17 +34,19 @@ from app.routers.auth import _consume_flash
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/my-sites", tags=["my-sites"])
-from app.templates_global import templates
+templates = Jinja2Templates(directory="app/templates")
 
 # Roles that can access this page
 _SITE_ADMIN_ROLES = {"site_admin"}
 
 
 def _flash(request: Request, category: str, message: str) -> None:
+    """Store a flash message in the session for display on the next page load."""
     request.session["flash"] = (category, message)
 
 
 def _render(request: Request, template: str, **ctx) -> HTMLResponse:
+    """Render a Jinja2 template with request context, current user, and flash message."""
     ctx["request"] = request
     ctx["flash"] = _consume_flash(request)
     return templates.TemplateResponse(template, ctx)
@@ -81,6 +84,7 @@ def _fetch_my_site(site_id: int, user: dict) -> Optional[dict]:
 
 
 def _fetch_my_sites(user: dict) -> list[dict]:
+    """Return sites assigned to this user (filtered by site_name), ordered by display name."""
     accessible = get_accessible_sites(user)
     if not accessible:
         return []
@@ -106,6 +110,7 @@ def _fetch_my_sites(user: dict) -> list[dict]:
 
 @router.get("", response_class=HTMLResponse)
 async def my_sites_list(request: Request, user=Depends(login_required)):
+    """GET /my-sites — show the site_admin's assigned sites list."""
     user = _require_site_admin(user)
     sites = _fetch_my_sites(user)
     return _render(request, "my_sites/list.html", sites=sites, current_user=user)
@@ -119,6 +124,7 @@ async def my_sites_list(request: Request, user=Depends(login_required)):
 async def my_sites_edit_form(
     site_id: int, request: Request, user=Depends(login_required)
 ):
+    """GET /my-sites/{id}/edit — render the limited site edit form for a site_admin."""
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
     if not site:
@@ -152,6 +158,7 @@ async def my_sites_edit_post(
     sunsynk_password: str = Form(""),
     sunsynk_plant_id: str = Form(""),
 ):
+    """POST /my-sites/{id}/edit — save allowed site detail changes (display name, location, Sunsynk creds)."""
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
     if not site:
@@ -244,10 +251,11 @@ async def my_inverters_add(
     dongle_serial: str = Form(""),
     inverter_sn: str = Form(""),
 ):
+    """POST /my-sites/{id}/inverters/add — add an inverter or Cerbo GX device entry to the site."""
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
-    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
-        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
+    if not site or site["source_type"] != "deye":
+        _flash(request, "danger", "Site not found or not a Deye site.")
         return RedirectResponse(url=f"/my-sites/{site_id}/edit", status_code=303)
 
     if not inv_name.strip() or not inv_ip.strip():
@@ -257,18 +265,15 @@ async def my_inverters_add(
     try:
         raw = site["inverters"]
         inverters = raw if isinstance(raw, list) else (json.loads(raw) if raw else [])
-        inv_entry = {"name": inv_name.strip()}
-        if site["source_type"] == "victron":
-            inv_entry["mqtt_host"] = inv_ip.strip()
-            inv_entry["mqtt_port"] = 1883
-        else:
-            inv_entry["ip"] = inv_ip.strip()
-            inv_entry["dongle_serial"] = int(dongle_serial) if dongle_serial.strip() else 0
-            inv_entry["inverter_sn"] = inverter_sn.strip()
-        inverters.append(inv_entry)
+        inverters.append({
+            "name": inv_name.strip(),
+            "ip": inv_ip.strip(),
+            "dongle_serial": int(dongle_serial) if dongle_serial.strip() else 0,
+            "inverter_sn": inverter_sn.strip(),
+        })
         with get_connection() as conn:
             conn.execute(
-                text("UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"),
+                text("UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"),
                 {"inv": json.dumps(inverters), "id": site_id},
             )
     except Exception as e:
@@ -285,10 +290,11 @@ async def my_inverters_delete(
     request: Request,
     user=Depends(login_required),
 ):
+    """POST /my-sites/{id}/inverters/{idx}/delete — remove a device entry by list index."""
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
-    if not site or site["source_type"] not in ("deye", "victron", "sungrow"):
-        _flash(request, "danger", "Site not found or this site type does not support inverter configuration.")
+    if not site or site["source_type"] != "deye":
+        _flash(request, "danger", "Site not found or not a Deye site.")
         return RedirectResponse(url=f"/my-sites/{site_id}/edit", status_code=303)
 
     try:
@@ -298,7 +304,7 @@ async def my_inverters_delete(
             removed = inverters.pop(inv_idx)
             with get_connection() as conn:
                 conn.execute(
-                    text("UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"),
+                    text("UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"),
                     {"inv": json.dumps(inverters), "id": site_id},
                 )
             _flash(request, "success", f"Inverter '{removed.get('name', '')}' removed.")
@@ -321,6 +327,7 @@ import secrets as _secrets
 async def my_token_generate(
     site_id: int, request: Request, user=Depends(login_required)
 ):
+    """POST /my-sites/{id}/token/generate — generate a new 256-bit hex share token for the site."""
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
     if not site:
@@ -345,6 +352,7 @@ async def my_token_generate(
 async def my_token_revoke(
     site_id: int, request: Request, user=Depends(login_required)
 ):
+    """POST /my-sites/{id}/token/revoke — delete the share token, making the public share link invalid."""
     user = _require_site_admin(user)
     site = _fetch_my_site(site_id, user)
     if not site:

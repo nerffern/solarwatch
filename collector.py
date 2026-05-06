@@ -270,6 +270,7 @@ import victron_worker
 
 
 def poll_deye_inverter_with_retry(inv: dict, site_name: str) -> Optional[dict]:
+    """Poll one Deye inverter with up to MAX_RETRIES attempts. Returns the reading dict or None after all retries fail."""
     for attempt in range(1, MAX_RETRIES + 1):
         result = deye_worker.poll(inv, site_name)
         if result is not None:
@@ -285,6 +286,7 @@ def poll_deye_inverter_with_retry(inv: dict, site_name: str) -> Optional[dict]:
 
 
 def poll_deye_sites(sites: list[dict]):
+    """Poll all Deye inverter sites in sequence. Each site can have multiple inverters polled one after another."""
     for site in sites:
         site_name = site["site_name"]
         for inv in (site.get("inverters") or []):
@@ -323,6 +325,7 @@ def _sync_sunsynk_clients(sunsynk_sites: list[dict]):
 
 
 def poll_sunsynk_sites(sites: list[dict]):
+    """Poll all Sunsynk cloud sites. Uses cached SunsynkClient instances keyed by username to avoid re-authenticating every cycle."""
     for site in sites:
         site_name = site["site_name"]
         try:
@@ -366,7 +369,8 @@ def poll_victron_sites(sites: list[dict]):
     The inverter config in sites.inverters should have exactly one entry:
       [{"name": "Victron_1", "mqtt_host": "10.0.1.80", "mqtt_port": 1883}]
 
-    If inverters is empty, falls back to VICTRON_MQTT_HOST env var.
+    The Cerbo GX IP is read from the inverters JSONB config stored in the DB
+    and set via the web UI (Sites → Edit → Add device).
     """
     for site in sites:
         if not running:
@@ -374,14 +378,14 @@ def poll_victron_sites(sites: list[dict]):
         site_name = site["site_name"]
         inverters = site.get("inverters") or []
 
-        # Use first inverter config, or build one from env var
-        if inverters:
-            inv = inverters[0]
-        else:
-            inv = {
-                "name":      "Victron",
-                "mqtt_host": os.getenv("VICTRON_MQTT_HOST", ""),
-            }
+        if not inverters:
+            log.warning(
+                f"[{site_name}] Victron site has no inverter config — "
+                f"add the Cerbo GX IP via the web UI: Sites → Edit → Add device."
+            )
+            continue
+
+        inv = inverters[0]
 
         inv_name = inv.get("name", "Victron")
 
@@ -433,6 +437,7 @@ _weather_lock = threading.Lock()
 
 
 def _weather_thread_fn(sites: list[dict]):
+    """Background thread function — fetch weather for each site that has coordinates set and hasn't been updated within WEATHER_INTERVAL seconds."""
     now = time.monotonic()
     for site in sites:
         site_name = site["site_name"]
@@ -467,6 +472,7 @@ running = True
 
 
 def handle_signal(sig, frame):
+    """Signal handler for SIGTERM and SIGINT — sets the running flag to False so the main loop exits cleanly after the current poll."""
     global running
     log.info(f"Signal {sig} — shutting down gracefully...")
     running = False
@@ -479,6 +485,7 @@ signal.signal(signal.SIGINT,  handle_signal)
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Main collector loop — verifies DB, loads site config, polls all inverter types every POLL_INTERVAL seconds. Runs until SIGTERM/SIGINT."""
     log.info("=" * 60)
     log.info("SolarWatch Collector starting")
     host_part = _build_database_url().split("@")[-1]
