@@ -1,0 +1,39 @@
+# ── solarwatch-collector.service ──────────────────────────────────────────────
+# Systemd unit for the SolarWatch inverter data collector.
+#
+# Polls all configured inverter sites (Deye, Sunsynk, Victron, Sungrow) and
+# writes readings to PostgreSQL. Runs independently of the web app.
+# Config changes made in the web UI are picked up every CONFIG_RELOAD seconds
+# (default 5 min) — no restart needed.
+#
+# Install:
+#   sudo cp solarwatch-collector.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now solarwatch-collector
+#
+# Logs:  sudo journalctl -u solarwatch-collector -f
+# Stop:  sudo systemctl stop solarwatch-collector
+# Start: sudo systemctl start solarwatch-collector
+
+[Unit]
+Description=SolarWatch Inverter Collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=solarwatch
+Group=solarwatch
+WorkingDirectory=/opt/solarwatch
+ExecStart=/opt/solarwatch/venv/bin/python3 collector.py
+Restart=always
+RestartSec=15
+# Allow up to 30s for graceful shutdown (SIGTERM) before SIGKILL
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=solarwatch-collector
+EnvironmentFile=/opt/solarwatch/.env
+
+[Install]
+WantedBy=multi-user.target

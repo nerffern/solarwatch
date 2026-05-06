@@ -1,0 +1,45 @@
+# ── solarwatch-web.service ────────────────────────────────────────────────────
+# Systemd unit for the SolarWatch FastAPI web application.
+#
+# Serves the admin UI, dashboard, API, and public share links.
+# Runs independently of the collector — restart without affecting data collection.
+#
+# Install:
+#   sudo cp solarwatch-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now solarwatch-web
+#
+# Logs:  sudo journalctl -u solarwatch-web -f
+# Stop:  sudo systemctl stop solarwatch-web
+# Start: sudo systemctl start solarwatch-web
+
+[Unit]
+Description=SolarWatch Web Application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=solarwatch
+Group=solarwatch
+WorkingDirectory=/opt/solarwatch
+ExecStart=/opt/solarwatch/venv/bin/gunicorn main:app \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --workers 2 \
+    --bind 0.0.0.0:8000 \
+    --timeout 60 \
+    --graceful-timeout 30 \
+    --keep-alive 5 \
+    --access-logfile - \
+    --error-logfile -
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=solarwatch-web
+EnvironmentFile=/opt/solarwatch/.env
+
+[Install]
+WantedBy=multi-user.target
