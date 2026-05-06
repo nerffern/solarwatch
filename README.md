@@ -603,18 +603,108 @@ can still reach it for health checking.
 The collector runs as a long-lived process. It is recommended to run it as a
 systemd service on a worker node close to your inverters.
 
+### Bare-metal / systemd deployment (Rocky Linux / RHEL / Ubuntu)
+
+This is the recommended approach for a dedicated always-on server.
+
+**1. Create the system user and directory**
 ```bash
-# Copy and edit the service file
-sudo cp solarwatch.service /etc/systemd/system/solarwatch-collector.service
-sudo nano /etc/systemd/system/solarwatch-collector.service
-# Set WorkingDirectory, EnvironmentFile, and ExecStart paths
+sudo useradd -r -s /sbin/nologin -d /opt/solarwatch solarwatch
+sudo mkdir -p /opt/solarwatch
+sudo chown solarwatch:solarwatch /opt/solarwatch
+```
 
+**2. Clone the repository**
+```bash
+sudo -u solarwatch git clone https://github.com/nerffern/solarwatch.git /opt/solarwatch
+```
+
+**3. Create the Python virtual environment**
+```bash
+sudo python3.12 -m venv /opt/solarwatch/venv
+sudo chown -R solarwatch:solarwatch /opt/solarwatch/venv
+sudo -u solarwatch /opt/solarwatch/venv/bin/pip install -r /opt/solarwatch/requirements.txt
+```
+
+**4. Create the .env file**
+```bash
+sudo -u solarwatch cp /opt/solarwatch/.env.example /opt/solarwatch/.env
+sudo -u solarwatch nano /opt/solarwatch/.env
+```
+
+Minimum required settings for the collector:
+```bash
+# Database — use your HA PostgreSQL VIP
+DATABASE_URL=postgresql+psycopg2://solarwatch_user:yourpassword@postgres-ha.hfisystems.com:5432/solarwatch
+
+# Collector tuning (defaults are fine to start)
+POLL_INTERVAL=60
+CONFIG_RELOAD=300
+WEATHER_INTERVAL=900
+```
+
+Note: The collector does not need `SECRET_KEY`, `APP_ADMIN_*`, or any web app
+settings — it only reads the DB connection variables.
+
+**5. Install and start the collector service**
+```bash
+sudo cp /opt/solarwatch/solarwatch.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now solarwatch-collector
+sudo systemctl enable --now solarwatch
+```
 
-# Check status
-sudo systemctl status solarwatch-collector
-sudo journalctl -u solarwatch-collector -f
+**6. Check it's running**
+```bash
+sudo systemctl status solarwatch
+sudo journalctl -u solarwatch -f
+```
+
+Expected startup output:
+```
+SolarWatch Collector starting
+DB              : postgres-ha.../solarwatch
+DB connection verified
+Sites loaded:
+  deye:    ['Selati', 'Lanner']
+  sunsynk: ['Penguin']
+  victron: ['Harmonia', 'Oppikop']
+```
+
+**Useful commands**
+```bash
+# Live logs
+sudo journalctl -u solarwatch -f
+
+# Restart after .env or code changes
+sudo systemctl restart solarwatch
+
+# Check last 50 log lines
+sudo journalctl -u solarwatch -n 50 --no-pager
+
+# Stop collector without disabling
+sudo systemctl stop solarwatch
+```
+
+**Running collector alongside an existing web server**
+
+The collector is completely independent — it only writes to the database.
+You can run the new collector (`solarwatch.service`) alongside any existing
+dashboard or web server with no conflicts. They share only the database.
+
+To replace the old collector:
+```bash
+# Pull the latest code
+sudo -u solarwatch git -C /opt/solarwatch pull
+
+# Install any new dependencies
+sudo -u solarwatch /opt/solarwatch/venv/bin/pip install -r /opt/solarwatch/requirements.txt
+
+# Stop and disable the old collector service (use whatever the old service is named)
+sudo systemctl stop solarwatch-old
+sudo systemctl disable solarwatch-old
+
+# Start the new one
+sudo systemctl enable --now solarwatch
 ```
 
 The collector reloads site configuration from the database every 5 minutes
@@ -660,10 +750,27 @@ solar chargers, and daily yield is totalled across all devices.
 
 ## Upgrading
 
-1. Pull the new code
-2. Run any new migration SQL files as postgres if present
-3. Restart the web app (or roll out new K8s deployment)
-4. The collector does not need restarting for most upgrades
+### Bare-metal / systemd
 
-For K8s upgrades, update the image tag in your tenant values file and run
-`helm upgrade`. The rolling update ensures zero downtime.
+```bash
+# Pull latest code
+sudo -u solarwatch git -C /opt/solarwatch pull
+
+# Install any new dependencies
+sudo -u solarwatch /opt/solarwatch/venv/bin/pip install -r /opt/solarwatch/requirements.txt
+
+# Run any new migration SQL files if present (check git log / release notes)
+# psql -h your-postgres-host -U postgres -d solarwatch -f /opt/solarwatch/migrate_xyz.sql
+
+# Restart services
+sudo systemctl restart solarwatch          # collector
+sudo systemctl restart solarwatch-powerflow  # web app (if running)
+```
+
+### Kubernetes
+
+Update the image tag in your tenant values file and run `helm upgrade`.
+The rolling update ensures zero downtime.
+
+For most upgrades the collector does not need restarting — config changes
+are picked up automatically every `CONFIG_RELOAD` seconds (default 5 min).

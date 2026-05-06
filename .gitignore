@@ -1,16 +1,50 @@
-.env
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
-.pytest_cache/
-.venv/
-venv/
+*.pyd
+.Python
+*.egg-info/
 dist/
 build/
-*.egg-info/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment / secrets — NEVER commit these
+.env
+*.env
+!.env.example
+
+# Logs
+logs/
+*.log
+collector.log
+
+# IDE
 .idea/
 .vscode/
-*.log
+*.iml
+*.swp
+*.swo
 
-# KDE/Dolphin file manager artefact — never commit this
-.directory
+# OS
+.DS_Store
+Thumbs.db
+
+# Alembic
+alembic/versions/*.pyc
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Distribution
+*.zip
+*.tar.gz
