@@ -29,7 +29,7 @@
  *  └──────────────────────────────┴──────────────────────────────────────────┘
  */
 
-const CACHE_NAME = 'solarwatch-v4';
+const CACHE_NAME = 'solarwatch-v5';
 
 const NETWORK_ONLY_PREFIXES = ['/api/', '/health'];
 const NETWORK_ONLY_EXACT    = ['/manifest.json', '/sw.js', '/favicon.ico'];
