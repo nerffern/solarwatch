@@ -19,7 +19,7 @@ const NAV_PREFIXES = [
 ];
 
 const PRECACHE_URLS = [
-  // /dashboard and /auth/login are intentionally excluded — they contain
+  // /dashboard and /auth/login are intentionally excluded - they contain
   // server-rendered user data and must never be served from cache.
   '/static/css/admin.css',
   '/static/css/fonts.css',
@@ -33,14 +33,14 @@ const PRECACHE_URLS = [
   '/static/icons/favicon.ico',
 ];
 
-// ── OFFLINE PAGE ──────────────────────────────────────────────────────────────
+// -- OFFLINE PAGE --------------------------------------------------------------
 const OFFLINE_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0a0c10">
-<title>SolarWatch — Offline</title>
+<title>SolarWatch - Offline</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -66,15 +66,15 @@ button:hover{background:#e09510}
 </style>
 </head>
 <body>
-  <div class="sun">☀️</div>
+  <div class="sun"></div>
   <h1>SolarWatch</h1>
-  <p>You're offline — the server isn't reachable right now.</p>
+  <p>You're offline - the server isn't reachable right now.</p>
   <p class="hint">Live data will resume automatically when your connection is restored.</p>
   <button onclick="location.reload()">Try Again</button>
 </body>
 </html>`;
 
-// ── INSTALL ───────────────────────────────────────────────────────────────────
+// -- INSTALL -------------------------------------------------------------------
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -91,7 +91,7 @@ self.addEventListener('install', event => {
   );
 });
 
-// ── ACTIVATE ──────────────────────────────────────────────────────────────────
+// -- ACTIVATE ------------------------------------------------------------------
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
@@ -105,7 +105,7 @@ self.addEventListener('activate', event => {
   );
 });
 
-// ── FETCH ─────────────────────────────────────────────────────────────────────
+// -- FETCH ---------------------------------------------------------------------
 self.addEventListener('fetch', event => {
   const req  = event.request;
   const url  = new URL(req.url);
@@ -115,7 +115,7 @@ self.addEventListener('fetch', event => {
 
   const path = url.pathname;
 
-  // ── 1. API + health — Network Only ────────────────────────────────────────
+  // -- 1. API + health - Network Only ----------------------------------------
   if (NETWORK_ONLY_PREFIXES.some(p => path.startsWith(p))) {
     event.respondWith(
       fetch(req).then(res => { notifyOnline(); return res; })
@@ -130,13 +130,13 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 2. Manifests + SW — Network Only ──────────────────────────────────────
+  // -- 2. Manifests + SW - Network Only --------------------------------------
   if (NETWORK_ONLY_EXACT.includes(path) || path.endsWith('/manifest.json')) {
     event.respondWith(fetch(req).catch(() => new Response('', { status: 503 })));
     return;
   }
 
-  // ── 3. Vendor JS + fonts + CSS — Cache First (immutable) ──────────────────
+  // -- 3. Vendor JS + fonts + CSS - Cache First (immutable) ------------------
   if (
     path.startsWith('/static/js/vendor/') ||
     path.startsWith('/static/fonts/') ||
@@ -154,7 +154,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 4. Icons — Cache First ─────────────────────────────────────────────────
+  // -- 4. Icons - Cache First -------------------------------------------------
   if (path.startsWith('/static/icons/')) {
     event.respondWith(
       caches.match(req).then(cached => cached || fetch(req).then(res => {
@@ -165,7 +165,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 5. Navigation pages — Network Only, offline fallback (NO cache)
+  // -- 5. Navigation pages - Network Only, offline fallback (NO cache)
   //   These pages contain server-rendered user data (current_user in templates).
   //   Caching them would show stale user info after logout/login with a
   //   different account. Always fetch from network; fall back to offline page
@@ -174,13 +174,13 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(req)
         .then(res => {
-          // Do NOT cache navigation responses — they are user-specific
+          // Do NOT cache navigation responses - they are user-specific
           notifyOnline();
           return res;
         })
         .catch(async () => {
           notifyOffline();
-          // No cached page to fall back to — show offline message
+          // No cached page to fall back to - show offline message
           return new Response(OFFLINE_HTML, {
             status: 200,
             headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -190,7 +190,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 6. Everything else — Stale-While-Revalidate ───────────────────────────
+  // -- 6. Everything else - Stale-While-Revalidate ---------------------------
   event.respondWith(
     caches.match(req).then(cached => {
       const networkFetch = fetch(req).then(res => {
@@ -206,7 +206,7 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// ── ONLINE / OFFLINE BROADCAST ────────────────────────────────────────────────
+// -- ONLINE / OFFLINE BROADCAST ------------------------------------------------
 let _offlineState = false;
 
 function notifyOffline() {

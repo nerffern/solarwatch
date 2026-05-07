@@ -55,6 +55,12 @@ async def service_worker():
     # Never cache the service worker itself — browser must always get latest
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Service-Worker-Allowed"] = "/"
+    # Tell Cloudflare Rocket Loader to skip this file entirely.
+    # Rocket Loader wraps scripts in its own eval() which breaks the SW
+    # because service workers cannot be loaded via eval() — they must be
+    # parsed as a top-level script. X-No-Transform is the standard header
+    # that instructs Cloudflare (and other proxies) not to modify the response.
+    response.headers["X-No-Transform"] = "1"
     return response
 
 
