@@ -146,7 +146,7 @@ self.addEventListener('fetch', event => {
       caches.match(req).then(cached => {
         if (cached) return cached;
         return fetch(req).then(res => {
-          if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+          if (res.ok) { const clone = res.clone(); caches.open(CACHE_NAME).then(c => c.put(req, clone)); }
           return res;
         });
       })
@@ -158,7 +158,7 @@ self.addEventListener('fetch', event => {
   if (path.startsWith('/static/icons/')) {
     event.respondWith(
       caches.match(req).then(cached => cached || fetch(req).then(res => {
-        if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+        if (res.ok) { const clone = res.clone(); caches.open(CACHE_NAME).then(c => c.put(req, clone)); }
         return res;
       }))
     );
@@ -194,7 +194,7 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(req).then(cached => {
       const networkFetch = fetch(req).then(res => {
-        if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+        if (res.ok) { const clone = res.clone(); caches.open(CACHE_NAME).then(c => c.put(req, clone)); }
         notifyOnline();
         return res;
       }).catch(() => {
