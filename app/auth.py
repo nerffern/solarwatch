@@ -204,7 +204,7 @@ def require_role(*role_names: str) -> Callable:
                 "danger",
                 "You do not have permission to access that page.",
             )
-            _redirect("/")
+            _redirect("/dashboard")
         return user
 
     return guard

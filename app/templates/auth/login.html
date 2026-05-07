@@ -21,4 +21,9 @@
     </form>
   </div>
 </div>
+<script>
+  // Clear site preference on login page — prevents stale site from a previous
+  // higher-privilege session leaking into the next user's dashboard.
+  try { localStorage.removeItem('sw_site'); } catch(e) {}
+</script>
 {% endblock %}

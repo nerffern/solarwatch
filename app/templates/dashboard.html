@@ -64,6 +64,13 @@ header{
   text-decoration:none;transition:all .2s;display:inline-flex;align-items:center;gap:4px;
 }
 .admin-btn:hover{background:rgba(245,166,35,.12);border-color:var(--solar);}
+.signout-btn{
+  font-family:var(--sans);font-size:clamp(9px,.82vw,12px);font-weight:700;
+  padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,80,80,.35);
+  background:transparent;color:#ff6b6b;letter-spacing:.06em;text-transform:uppercase;
+  text-decoration:none;transition:all .2s;display:inline-flex;align-items:center;gap:4px;
+}
+.signout-btn:hover{background:rgba(255,80,80,.12);border-color:#ff6b6b;color:#ff8080;}
 
 /* Cycle button */
 .cycle-btn{
@@ -588,7 +595,7 @@ footer{
       {% elif current_user.role_name == "site_admin" %}
         <a class="admin-btn" href="/my-sites" title="My sites">⚙ My Sites</a>
       {% endif %}
-      <a class="signout-btn" href="/auth/logout" title="Sign out">↩ Sign out</a>
+      <a class="signout-btn" href="/auth/logout" title="Sign out">⏻ Sign out</a>
     {% endif %}
 
     <!-- Age -->
