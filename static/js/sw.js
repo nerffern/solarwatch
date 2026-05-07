@@ -29,7 +29,7 @@
  *  └──────────────────────────────┴──────────────────────────────────────────┘
  */
 
-const CACHE_NAME = 'solarwatch-v5';
+const CACHE_NAME = 'solarwatch-v6';  // v6: nav pages no longer cached
 
 const NETWORK_ONLY_PREFIXES = ['/api/', '/health'];
 const NETWORK_ONLY_EXACT    = ['/manifest.json', '/sw.js', '/favicon.ico'];
@@ -41,8 +41,8 @@ const NAV_PREFIXES = [
 ];
 
 const PRECACHE_URLS = [
-  '/dashboard',
-  '/auth/login',
+  // /dashboard and /auth/login are intentionally excluded — they contain
+  // server-rendered user data and must never be served from cache.
   '/static/css/admin.css',
   '/static/css/fonts.css',
   '/static/js/vendor/chart.umd.min.js',
@@ -187,19 +187,22 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ── 5. Navigation pages — Network First with offline fallback ──────────────
+  // ── 5. Navigation pages — Network Only, offline fallback (NO cache)
+  //   These pages contain server-rendered user data (current_user in templates).
+  //   Caching them would show stale user info after logout/login with a
+  //   different account. Always fetch from network; fall back to offline page
+  //   only when the network is genuinely unavailable.
   if (req.mode === 'navigate' || NAV_PREFIXES.some(p => path.startsWith(p))) {
     event.respondWith(
       fetch(req)
         .then(res => {
-          if (res.ok) caches.open(CACHE_NAME).then(c => c.put(req, res.clone()));
+          // Do NOT cache navigation responses — they are user-specific
           notifyOnline();
           return res;
         })
         .catch(async () => {
           notifyOffline();
-          const cached = await caches.match(req);
-          if (cached) return cached;
+          // No cached page to fall back to — show offline message
           return new Response(OFFLINE_HTML, {
             status: 200,
             headers: { 'Content-Type': 'text/html; charset=utf-8' }

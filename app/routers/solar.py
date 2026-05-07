@@ -676,7 +676,8 @@ def _serialise(obj: Any) -> Any:
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, user=Depends(login_required)):
     """Full-screen power flow dashboard — requires login."""
-    return templates.TemplateResponse(
+    from starlette.responses import Response
+    response = templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
@@ -684,6 +685,11 @@ async def dashboard(request: Request, user=Depends(login_required)):
             "flash": _consume_flash(request),
         },
     )
+    # Prevent browser and intermediate caches from storing this page.
+    # It contains server-rendered user-specific data (role, username, sites).
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @router.get("/api/solar/sites")
