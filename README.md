@@ -25,6 +25,17 @@ and battery state — built on the FastAPI SaaS template.
 
 ---
 
+## Documentation
+
+Detailed step-by-step guides are in the [`docs/`](docs/) folder:
+
+| Guide | Description |
+|---|---|
+| [Adding a site](docs/adding-a-site.md) | Deye, Sunsynk, and Victron — full setup walkthrough |
+| [Upgrading](docs/upgrading.md) | Code upgrades, migration SQL, removing old services |
+
+---
+
 ## Architecture
 
 ```
@@ -791,6 +802,17 @@ sudo -u solarwatch /opt/solarwatch/venv/bin/pip install -r /opt/solarwatch/requi
 sudo systemctl restart solarwatch-collector
 sudo systemctl restart solarwatch-web
 ```
+
+**Removing old service files (one-time cleanup after migration):**
+```bash
+sudo systemctl stop solarwatch solarwatch-powerflow 2>/dev/null
+sudo systemctl disable solarwatch solarwatch-powerflow 2>/dev/null
+sudo rm -f /etc/systemd/system/solarwatch.service
+sudo rm -f /etc/systemd/system/solarwatch-powerflow.service
+sudo systemctl daemon-reload
+```
+
+See [docs/upgrading.md](docs/upgrading.md) for more detail.
 
 ### Kubernetes
 
