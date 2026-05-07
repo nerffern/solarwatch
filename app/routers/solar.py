@@ -170,35 +170,116 @@ def _get_flow(site: str) -> dict:
     # Starts at DATE_TRUNC('day') + 1 hour because Deye resets counters
     # between 00:00–01:00 SAST. Starting at 01:00 avoids the reset window.
     try:
-        daily_row = _query_one(
+        # Daily counters — two strategies:
+        #
+        # Strategy A (Deye / Sunsynk): use the daily_* register columns which
+        #   the inverter maintains as running totals. Take the latest value per
+        #   inverter and sum across inverters.
+        #
+        # Strategy B (Victron): daily_load_energy and daily_grid_import are
+        #   NULL because Victron MQTT doesn't expose these counters. Instead
+        #   we integrate the power time-series (kW × hours) since midnight.
+        #   daily_pv_energy IS available (History/Daily/0/Yield from MPPT).
+
+        # Check if this site has register-based counters (Deye / Sunsynk)
+        has_registers = _query_one(
             """
-            SELECT
-              COALESCE(
-                MAX(load_val) FILTER (WHERE grid_val > 0),
-                MAX(load_val)
-              ) as load_kwh,
-              MAX(grid_val)  as grid_kwh,
-              SUM(pv_val)    as pv_kwh
-            FROM (
-              SELECT DISTINCT ON (inverter_name)
-                inverter_name,
-                daily_load_energy  as load_val,
-                daily_grid_import  as grid_val,
-                daily_pv_energy    as pv_val
-              FROM solar_readings
-              WHERE site_name ILIKE :site
-              AND time >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Africa/Johannesburg')
-                           AT TIME ZONE 'Africa/Johannesburg' + INTERVAL '1 hour'
-              AND daily_load_energy > 0
-              AND daily_load_energy < 200
-              ORDER BY inverter_name, time DESC
-            ) sub
+            SELECT 1 AS has_regs
+            FROM solar_readings
+            WHERE site_name ILIKE :site
+            AND time >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Africa/Johannesburg')
+                         AT TIME ZONE 'Africa/Johannesburg' + INTERVAL '1 hour'
+            AND daily_load_energy IS NOT NULL
+            AND daily_load_energy > 0
+            LIMIT 1
             """,
             {"site": site},
         )
-        load = float(daily_row.get("load_kwh") or 1)
-        grid = float(daily_row.get("grid_kwh") if daily_row.get("grid_kwh") is not None else 0)
-        pv   = float(daily_row.get("pv_kwh") or 0)
+
+        if has_registers:
+            # Strategy A — register-based (Deye / Sunsynk)
+            daily_row = _query_one(
+                """
+                SELECT
+                  COALESCE(
+                    MAX(load_val) FILTER (WHERE grid_val > 0),
+                    MAX(load_val)
+                  ) as load_kwh,
+                  MAX(grid_val)  as grid_kwh,
+                  SUM(pv_val)    as pv_kwh
+                FROM (
+                  SELECT DISTINCT ON (inverter_name)
+                    inverter_name,
+                    daily_load_energy  as load_val,
+                    daily_grid_import  as grid_val,
+                    daily_pv_energy    as pv_val
+                  FROM solar_readings
+                  WHERE site_name ILIKE :site
+                  AND time >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Africa/Johannesburg')
+                               AT TIME ZONE 'Africa/Johannesburg' + INTERVAL '1 hour'
+                  AND daily_load_energy > 0
+                  AND daily_load_energy < 200
+                  ORDER BY inverter_name, time DESC
+                ) sub
+                """,
+                {"site": site},
+            )
+            load = float(daily_row.get("load_kwh") or 1)
+            grid = float(daily_row.get("grid_kwh") if daily_row.get("grid_kwh") is not None else 0)
+            pv   = float(daily_row.get("pv_kwh") or 0)
+        else:
+            # Strategy B — time-series integration (Victron)
+            #
+            # PV today: daily_pv_energy is a running COUNTER (e.g. 32.4 kWh at 3pm).
+            #   Take MAX per inverter (latest value = today's total), SUM across inverters.
+            #   NEVER SUM across rows — that would multiply the counter by row count.
+            #
+            # Load / Grid today: integrate power × (1/60 h) per minute-deduplicated row.
+
+            midnight_sast = """
+                DATE_TRUNC('day', NOW() AT TIME ZONE 'Africa/Johannesburg')
+                             AT TIME ZONE 'Africa/Johannesburg'
+            """
+
+            # Query 1: PV from MPPT daily yield counter
+            pv_row = _query_one(
+                f"""
+                SELECT ROUND(COALESCE(SUM(max_yield), 0)::numeric, 2) AS pv_kwh
+                FROM (
+                  SELECT inverter_name, MAX(daily_pv_energy) AS max_yield
+                  FROM solar_readings
+                  WHERE site_name ILIKE :site
+                  AND time >= {midnight_sast}
+                  AND daily_pv_energy IS NOT NULL
+                  AND daily_pv_energy > 0
+                  GROUP BY inverter_name
+                ) per_inv
+                """,
+                {"site": site},
+            )
+
+            # Query 2: Load and grid from power time-series integration
+            load_grid_row = _query_one(
+                f"""
+                SELECT
+                  ROUND((SUM(load_power)                    / 1000.0 / 60.0)::numeric, 2) AS load_kwh,
+                  ROUND((SUM(GREATEST(grid_power, 0))       / 1000.0 / 60.0)::numeric, 2) AS grid_kwh
+                FROM (
+                  SELECT DISTINCT ON (inverter_name, DATE_TRUNC('minute', time))
+                    load_power, grid_power
+                  FROM solar_readings
+                  WHERE site_name ILIKE :site
+                  AND time >= {midnight_sast}
+                  AND load_power IS NOT NULL
+                  ORDER BY inverter_name, DATE_TRUNC('minute', time), time DESC
+                ) deduped
+                """,
+                {"site": site},
+            )
+
+            pv   = float(pv_row.get("pv_kwh") or 0) if pv_row else 0
+            load = float(load_grid_row.get("load_kwh") or 0) if load_grid_row else 0
+            grid = float(load_grid_row.get("grid_kwh") or 0) if load_grid_row else 0
         d["self_suff"]      = max(0, min(100, round((1 - grid / max(load, 0.001)) * 100)))
         d["daily_load_kwh"] = round(load, 1)
         d["daily_grid_kwh"] = round(grid, 1)
@@ -237,24 +318,64 @@ def _get_monthly(site: str) -> dict:
         {"site": site},
     )
 
-    grid_row = _query_one(
+    # Monthly grid: use register-based counters if available (Deye/Sunsynk),
+    # otherwise integrate grid_power time-series per day (Victron).
+    has_grid_registers = _query_one(
         """
-        SELECT COALESCE(SUM(day_grid), 0) AS month_grid_kwh
-        FROM (
-          SELECT
-            DATE(time AT TIME ZONE 'Africa/Johannesburg') AS day,
-            MAX(daily_grid_import) FILTER (WHERE daily_grid_import > 0) AS day_grid
-          FROM solar_readings
-          WHERE DATE_TRUNC('month', time AT TIME ZONE 'Africa/Johannesburg')
-                = DATE_TRUNC('month', NOW() AT TIME ZONE 'Africa/Johannesburg')
-          AND site_name ILIKE :site
-          AND daily_grid_import IS NOT NULL
-          AND daily_grid_import BETWEEN 0.01 AND 9000
-          GROUP BY 1
-        ) sub
+        SELECT 1 FROM solar_readings
+        WHERE site_name ILIKE :site
+        AND DATE_TRUNC('month', time AT TIME ZONE 'Africa/Johannesburg')
+            = DATE_TRUNC('month', NOW() AT TIME ZONE 'Africa/Johannesburg')
+        AND daily_grid_import IS NOT NULL AND daily_grid_import > 0
+        LIMIT 1
         """,
         {"site": site},
     )
+
+    if has_grid_registers:
+        # Deye / Sunsynk — sum daily register values
+        grid_row = _query_one(
+            """
+            SELECT COALESCE(SUM(day_grid), 0) AS month_grid_kwh
+            FROM (
+              SELECT
+                DATE(time AT TIME ZONE 'Africa/Johannesburg') AS day,
+                MAX(daily_grid_import) FILTER (WHERE daily_grid_import > 0) AS day_grid
+              FROM solar_readings
+              WHERE DATE_TRUNC('month', time AT TIME ZONE 'Africa/Johannesburg')
+                    = DATE_TRUNC('month', NOW() AT TIME ZONE 'Africa/Johannesburg')
+              AND site_name ILIKE :site
+              AND daily_grid_import IS NOT NULL
+              AND daily_grid_import BETWEEN 0.01 AND 9000
+              GROUP BY 1
+            ) sub
+            """,
+            {"site": site},
+        )
+    else:
+        # Victron — integrate grid_power per day (positive = importing)
+        grid_row = _query_one(
+            """
+            SELECT COALESCE(ROUND(SUM(day_grid_kwh)::numeric, 2), 0) AS month_grid_kwh
+            FROM (
+              SELECT
+                DATE(time AT TIME ZONE 'Africa/Johannesburg') AS day,
+                SUM(GREATEST(grid_power, 0)) / 1000.0 / 60.0 AS day_grid_kwh
+              FROM (
+                SELECT DISTINCT ON (DATE_TRUNC('minute', time))
+                  time, grid_power
+                FROM solar_readings
+                WHERE site_name ILIKE :site
+                AND DATE_TRUNC('month', time AT TIME ZONE 'Africa/Johannesburg')
+                    = DATE_TRUNC('month', NOW() AT TIME ZONE 'Africa/Johannesburg')
+                AND grid_power IS NOT NULL
+                ORDER BY DATE_TRUNC('minute', time), time DESC
+              ) deduped
+              GROUP BY 1
+            ) daily
+            """,
+            {"site": site},
+        )
 
     result = {
         "month_pv_kwh":   round(float(pv_row.get("month_pv_kwh")   or 0), 1),
