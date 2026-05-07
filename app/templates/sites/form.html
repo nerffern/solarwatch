@@ -93,6 +93,17 @@
           <div class="sw-field">
             <label>Plant ID</label>
             <input class="sw-input" name="sunsynk_plant_id" value="{{ site.sunsynk_plant_id if site else '' }}" placeholder="Plant ID">
+            <div class="sw-field-hint">Found in the Sunsynk app URL: /monitor/plant/<strong>12345678</strong></div>
+          </div>
+        </div>
+        <div class="sw-field" style="margin-top:.75rem">
+          <label>Inverter serial numbers <span style="color:var(--muted);font-weight:400;font-size:.8rem">(optional — auto-discovered from plant)</span></label>
+          <input class="sw-input" name="sunsynk_inverter_sns"
+                 value="{{ site.inverters | map(attribute='inverter_sn') | join(', ') if site and site.inverters else '' }}"
+                 placeholder="e.g. 2211123456, 2211123457  (comma-separated if multiple)">
+          <div class="sw-field-hint">
+            Leave blank — the collector discovers inverter SNs automatically from your plant.
+            Only fill this in if auto-discovery fails (check collector logs for "No inverter SNs found").
           </div>
         </div>
       </div>

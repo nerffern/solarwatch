@@ -53,8 +53,9 @@ class DevelopmentConfig(BaseConfig):
 class ProductionConfig(BaseConfig):
     """Production config — strict CSP, HSTS, HTTPS-only cookies."""
     DEBUG: bool = False
-    # Strict CSP in production.
-    CSP_REPORT_ONLY: bool = False
+    # CSP Report-Only — dashboard uses inline <script> blocks which a blocking
+    # CSP would prevent. Violations are logged to the browser console only.
+    CSP_REPORT_ONLY: bool = True
     CSP_ALLOW_INLINE_SCRIPTS: bool = False
     # Enforce HTTPS cookies — required for multi-DC K8s behind TLS termination.
     SESSION_COOKIE_HTTPS_ONLY: bool = True

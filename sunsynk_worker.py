@@ -154,6 +154,22 @@ class SunsynkClient:
         """Return the latest real-time power flow data for a given plant ID."""
         return self._get(f"v1/plant/{plant_id}/realtime")
 
+    def get_plant_inverters(self, plant_id) -> list:
+        """Return the inverters registered under a plant.
+
+        This is the correct endpoint for discovering inverter serial numbers.
+        Each entry contains 'sn' (serial number) and 'alias' (display name).
+        Preferred over parsing get_plant_realtime() which does not reliably
+        include inverter SNs across all Sunsynk API versions.
+        """
+        data = self._get(f"v1/plant/{plant_id}/inverters?page=1&limit=20")
+        if not data:
+            return []
+        # Response shape varies — handle list or dict with infos/inverters key
+        if isinstance(data, list):
+            return data
+        return data.get("infos") or data.get("inverters") or []
+
     def get_inverter_flow(self, sn: str) -> Optional[dict]:
         """Live power flow — pv[], battPower, soc, gridOrMeterPower, loadOrEpsPower."""
         return self._get(f"v1/inverter/{sn}/flow")
@@ -340,14 +356,25 @@ def poll(site: dict, client: SunsynkClient) -> list[dict]:
         plant_id = plants[0]["id"]
         log.info(f"[{site_name}] Auto-discovered plant: {plants[0].get('name')} (ID {plant_id})")
 
-    plant_data   = client.get_plant_realtime(plant_id) or {}
+    # Step 1: dedicated plant inverters endpoint — most reliable source
+    plant_inverters = client.get_plant_inverters(plant_id)
     inverter_sns = [
-        inv.get("sn") or inv.get("serialNum")
-        for inv in plant_data.get("inverters", [])
-        if inv.get("sn") or inv.get("serialNum")
+        inv.get("sn") or inv.get("serialNum") or inv.get("inverterSn")
+        for inv in plant_inverters
+        if inv.get("sn") or inv.get("serialNum") or inv.get("inverterSn")
     ]
 
-    # Fallback to manually configured SNs
+    # Step 2: fallback — parse plant realtime response (older API versions)
+    if not inverter_sns:
+        plant_data = client.get_plant_realtime(plant_id) or {}
+        inverter_sns = [
+            inv.get("sn") or inv.get("serialNum")
+            for inv in plant_data.get("inverters", [])
+            if inv.get("sn") or inv.get("serialNum")
+        ]
+
+    # Step 3: fallback — manually entered SNs stored in site inverters JSONB
+    # (entered via Sites → Edit → Inverter serial numbers in the web UI)
     if not inverter_sns:
         inverter_sns = [
             i["inverter_sn"]
@@ -356,8 +383,11 @@ def poll(site: dict, client: SunsynkClient) -> list[dict]:
         ]
 
     if not inverter_sns:
-        log.error(f"[{site_name}] No inverter SNs found")
+        log.error(f"[{site_name}] No inverter SNs found — check plant ID or enter "
+                  f"serial numbers manually via Sites → Edit → Inverter serial numbers")
         return []
+
+    log.debug(f"[{site_name}] Polling {len(inverter_sns)} inverter(s): {inverter_sns}")
 
     results = []
     for i, sn in enumerate(inverter_sns, 1):

@@ -281,6 +281,7 @@ async def sites_edit_post(
     sunsynk_username: str = Form(""),
     sunsynk_password: str = Form(""),
     sunsynk_plant_id: str = Form(""),
+    sunsynk_inverter_sns: str = Form(""),  # comma-separated SNs, optional fallback
 ):
     """POST /sites/{id}/edit — save site detail changes (display name, location, coordinates, enabled)."""
     site = _fetch_site(site_id)
@@ -363,6 +364,25 @@ async def sites_edit_post(
     except Exception as e:
         _flash(request, "danger", f"Failed to update site: {e}")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
+
+    # If inverter SNs were provided for a Sunsynk site, store as fallback
+    sns_raw = sunsynk_inverter_sns.strip()
+    if sns_raw:
+        import json as _json
+        inv_list = [
+            {"name": f"Inverter_{i+1}", "inverter_sn": sn.strip()}
+            for i, sn in enumerate(sns_raw.split(","))
+            if sn.strip()
+        ]
+        try:
+            with get_connection() as conn:
+                conn.execute(
+                    text("UPDATE sites SET inverters = CAST(:inv AS jsonb) WHERE id = :id"),
+                    {"inv": _json.dumps(inv_list), "id": site_id},
+                )
+        except Exception as e:
+            _flash(request, "danger", f"Failed to save inverter SNs: {e}")
+            return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     _flash(request, "success", "Site updated.")
     return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
