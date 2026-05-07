@@ -203,7 +203,7 @@ async def sites_new_post(
                                        location, latitude, longitude, enabled, inverters)
                     VALUES (:site_name, :display_name, :source_type,
                             :location, :latitude, :longitude, :enabled,
-                            :inverters::jsonb)
+                            CAST(:inverters AS jsonb))
                     RETURNING id
                     """
                 ),
@@ -458,7 +458,7 @@ async def inverters_add(
         with get_connection() as conn:
             conn.execute(
                 text(
-                    "UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"
+                    "UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"
                 ),
                 {"inv": json.dumps(inverters), "id": site_id},
             )
@@ -499,7 +499,7 @@ async def inverters_delete(
         with get_connection() as conn:
             conn.execute(
                 text(
-                    "UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"
+                    "UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"
                 ),
                 {"inv": json.dumps(inverters), "id": site_id},
             )

@@ -273,7 +273,7 @@ async def my_inverters_add(
         })
         with get_connection() as conn:
             conn.execute(
-                text("UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"),
+                text("UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"),
                 {"inv": json.dumps(inverters), "id": site_id},
             )
     except Exception as e:
@@ -304,7 +304,7 @@ async def my_inverters_delete(
             removed = inverters.pop(inv_idx)
             with get_connection() as conn:
                 conn.execute(
-                    text("UPDATE sites SET inverters = :inv::jsonb, updated_at = NOW() WHERE id = :id"),
+                    text("UPDATE sites SET inverters = CAST(:inv AS jsonb), updated_at = NOW() WHERE id = :id"),
                     {"inv": json.dumps(inverters), "id": site_id},
                 )
             _flash(request, "success", f"Inverter '{removed.get('name', '')}' removed.")
