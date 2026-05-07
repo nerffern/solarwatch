@@ -1,33 +1,11 @@
-/**
- * SolarWatch — sw.js (Service Worker v4)
- *
- * All assets self-hosted — no CDN dependencies.
- * v4 changes from v3:
- *   - Added /my-sites/* to network-first navigation routes
- *   - Added admin.css to precache list
- *   - Added /static/css/admin.css Cache-First strategy
- *   - Improved offline page styling consistency with dark theme
- *   - Added background sync hint for when connectivity restores
- *   - Fixed share page scope — /share/* handled by stale-while-revalidate
- *
- * Caching strategy:
- *
- *  ┌──────────────────────────────┬──────────────────────────────────────────┐
- *  │ Request type                 │ Strategy                                 │
- *  ├──────────────────────────────┼──────────────────────────────────────────┤
- *  │ /api/*  /health              │ Network Only — live data, never cache    │
- *  │ /manifest.json  /sw.js       │ Network Only — must always be fresh      │
- *  │ /share/*/manifest.json       │ Network Only — per-site manifests        │
- *  │ Navigate: dashboard/auth/    │ Network First → cached → offline page    │
- *  │           my-sites/sites/    │                                          │
- *  │ /static/js/vendor/*          │ Cache First (versioned libs)             │
- *  │ /static/fonts/*              │ Cache First (immutable)                  │
- *  │ /static/css/*                │ Cache First (versioned with cache bump)  │
- *  │ /static/icons/*              │ Cache First → Network fallback           │
- *  │ /share/* (page + data)       │ Network First → cached → offline JSON    │
- *  │ Everything else              │ Stale-While-Revalidate                   │
- *  └──────────────────────────────┴──────────────────────────────────────────┘
- */
+// SolarWatch Service Worker
+// Cache strategy:
+//   /api/* /health              -> Network Only (live data)
+//   /manifest.json /sw.js       -> Network Only (always fresh)
+//   Navigate: /dashboard /auth/ -> Network Only, offline fallback (user-specific HTML)
+//   /static/js/vendor/*         -> Cache First (versioned)
+//   /static/fonts/* /static/css/* -> Cache First (immutable)
+//   Everything else             -> Stale-While-Revalidate
 
 const CACHE_NAME = 'solarwatch-v6';  // v6: nav pages no longer cached
 

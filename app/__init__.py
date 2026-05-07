@@ -45,13 +45,16 @@ def _load_dotenv_if_available() -> bool:
 def _build_csp(config) -> str:
     """Build the Content-Security-Policy header string based on the current environment. Stricter in production."""
     allow_inline = getattr(config, "CSP_ALLOW_INLINE_SCRIPTS", False)
-    script_src = "'self'" + (" 'unsafe-inline'" if allow_inline else "")
+    script_src = "'self' 'unsafe-inline'" + (" https://static.cloudflareinsights.com" if True else "")
+    # style-src needs 'unsafe-inline' because the app uses inline style= attributes
+    # throughout templates (e.g. margin, padding on layout elements). Moving all
+    # inline styles to classes is a future refactor — for now allow inline styles.
     return (
         "default-src 'self'; "
         f"script-src {script_src}; "
-        "style-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        "connect-src 'self'; "
+        "connect-src 'self' https://static.cloudflareinsights.com; "
         "manifest-src 'self'; "
         "worker-src 'self'; "
         "object-src 'none'; "

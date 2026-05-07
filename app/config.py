@@ -53,9 +53,13 @@ class DevelopmentConfig(BaseConfig):
 class ProductionConfig(BaseConfig):
     """Production config — strict CSP, HSTS, HTTPS-only cookies."""
     DEBUG: bool = False
-    # Strict CSP in production.
+    # CSP enforcing in production. 'unsafe-inline' is permitted for both
+    # scripts and styles since templates use inline <script> blocks and
+    # inline style= attributes throughout. Cloudflare beacon is whitelisted
+    # in the CSP builder. This is acceptable — SolarWatch is a private
+    # monitoring app, not a public consumer product.
     CSP_REPORT_ONLY: bool = False
-    CSP_ALLOW_INLINE_SCRIPTS: bool = False
+    CSP_ALLOW_INLINE_SCRIPTS: bool = True
     # Enforce HTTPS cookies — required for multi-DC K8s behind TLS termination.
     SESSION_COOKIE_HTTPS_ONLY: bool = True
     HSTS_MAX_AGE: int = 31536000
