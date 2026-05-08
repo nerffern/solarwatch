@@ -110,35 +110,67 @@ _engine: Optional[Engine] = None
 _engine_lock = threading.Lock()
 
 
+def _make_engine() -> Engine:
+    """Create a new SQLAlchemy engine from the current DATABASE_URL."""
+    url = _build_database_url()
+    engine = create_engine(
+        url,
+        pool_pre_ping=True,       # detects dropped/stale connections
+        pool_size=3,
+        max_overflow=2,
+        pool_timeout=30,
+        connect_args={
+            "application_name":     "solarwatch_collector",
+            "connect_timeout":      10,
+            # Only accept a writable (primary) node. With HAProxy + Patroni
+            # the VIP already routes to the primary, but this adds a
+            # driver-level guard: psycopg2 will refuse a replica connection
+            # immediately rather than letting a write fail mid-transaction.
+            "target_session_attrs": "read-write",
+        },
+    )
+    host_part = url.split("@")[-1] if "@" in url else url
+    log.info(f"DB engine ready → {host_part}")
+    return engine
+
+
 def get_engine() -> Engine:
     """Return the shared SQLAlchemy engine, creating it if needed."""
     global _engine
     with _engine_lock:
         if _engine is None:
-            url = _build_database_url()
-            _engine = create_engine(
-                url,
-                pool_pre_ping=True,
-                pool_size=3,
-                max_overflow=2,
-                pool_timeout=30,
-                connect_args={
-                    "application_name": "solarwatch_collector",
-                    "connect_timeout":  10,
-                },
-            )
-            # Log host/db only — never log credentials
-            host_part = url.split("@")[-1] if "@" in url else url
-            log.info(f"DB engine ready → {host_part}")
+            _engine = _make_engine()
     return _engine
+
+
+def _invalidate_engine():
+    """Dispose the current engine pool and force a full reconnect.
+
+    Called when a write fails with ReadOnlySqlTransaction, which means
+    the connected node has become a standby after a HA failover.
+    Disposing the pool forces every worker thread to get a fresh
+    connection on its next query, which will resolve to the new primary
+    via DNS.
+    """
+    global _engine
+    with _engine_lock:
+        if _engine is not None:
+            log.warning("DB: invalidating connection pool after HA failover — reconnecting to primary")
+            try:
+                _engine.dispose()
+            except Exception:
+                pass
+            _engine = None  # will be recreated on next get_engine() call
 
 
 @contextmanager
 def db_session():
     """Context manager: yield a SQLAlchemy connection in a transaction.
 
-    pool_pre_ping handles HA failover — if the connection is stale,
-    SQLAlchemy replaces it before the query executes.
+    Handles two failure modes automatically:
+    - Stale/dropped connections: pool_pre_ping replaces them transparently.
+    - HA failover (replica became primary): ReadOnlySqlTransaction is caught,
+      the pool is invalidated, and the caller retries once against the new primary.
     """
     with get_engine().begin() as conn:
         yield conn
@@ -238,7 +270,12 @@ _WEATHER_INSERT_SQL = text(
 
 
 def write_reading(site_name: str, inv_name: str, inv_sn: str, data: dict):
-    """Write one inverter reading to solar_readings."""
+    """Write one inverter reading to solar_readings.
+
+    Automatically handles PostgreSQL HA failover: if the connected node
+    has become a read-only replica (ReadOnlySqlTransaction), the engine
+    pool is invalidated and the write is retried once against the new primary.
+    """
     row = {
         "time":          datetime.now(timezone.utc),
         "site_name":     site_name,
@@ -246,21 +283,41 @@ def write_reading(site_name: str, inv_name: str, inv_sn: str, data: dict):
         "inverter_sn":   inv_sn,
         **data,
     }
-    try:
-        with db_session() as conn:
-            conn.execute(_INSERT_SQL, row)
-    except Exception as exc:
-        log.error(f"[{site_name}/{inv_name}] DB write failed: {exc}")
+    for attempt in range(2):
+        try:
+            with db_session() as conn:
+                conn.execute(_INSERT_SQL, row)
+            return  # success
+        except Exception as exc:
+            exc_str = str(exc)
+            if "ReadOnlySqlTransaction" in exc_str or "read-only transaction" in exc_str.lower():
+                # HA failover: this node is now a standby — invalidate the pool
+                # so the next attempt connects to the new primary via DNS
+                _invalidate_engine()
+                if attempt == 0:
+                    log.warning(f"[{site_name}/{inv_name}] DB read-only (HA failover) — retrying after pool reset")
+                    continue
+            log.error(f"[{site_name}/{inv_name}] DB write failed: {exc}")
+            return
 
 
 def write_weather(data: dict):
     """Write one weather reading — strips internal _emoji/_description keys."""
     row = {k: v for k, v in data.items() if not k.startswith("_")}
-    try:
-        with db_session() as conn:
-            conn.execute(_WEATHER_INSERT_SQL, row)
-    except Exception as exc:
-        log.error(f"[weather/{row.get('site_name')}] DB write failed: {exc}")
+    for attempt in range(2):
+        try:
+            with db_session() as conn:
+                conn.execute(_WEATHER_INSERT_SQL, row)
+            return
+        except Exception as exc:
+            exc_str = str(exc)
+            if "ReadOnlySqlTransaction" in exc_str or "read-only transaction" in exc_str.lower():
+                _invalidate_engine()
+                if attempt == 0:
+                    log.warning(f"[weather] DB read-only (HA failover) — retrying after pool reset")
+                    continue
+            log.error(f"[weather/{row.get('site_name')}] DB write failed: {exc}")
+            return
 
 
 # ── DEYE POLLING ──────────────────────────────────────────────────────────────
