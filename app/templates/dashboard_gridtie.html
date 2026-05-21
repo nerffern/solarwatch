@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SolarWatch">
+<meta name="theme-color" content="#0a0c10">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png">
+<title>SolarWatch</title>
+<meta name="description" content="Multi-site solar inverter monitoring — live power flow, grid export, and energy data.">
+<link rel="stylesheet" href="/static/css/fonts.css">
+<script src="/static/js/vendor/chart.umd.min.js"></script>
+<script src="/static/js/vendor/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0c10;--surface:#111318;--s2:#181c24;--border:#232736;
+  --text:#e8eaf2;--muted:#8090b8;
+  --solar:#f5a623;--green:#2ecc71;--amber:#f39c12;--red:#e74c3c;--load:#4fc3f7;
+  --gin:#e74c3c;--gout:#2ecc71;--batt:#2ecc71;
+  --mono:'DM Mono',monospace;--sans:'Barlow',sans-serif;
+}
+html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden}
+html.adv-scroll,html.adv-scroll body{overflow:auto;height:auto}
+
+/* ── APP SHELL ── */
+.app{display:grid;grid-template-rows:5.5vh auto 1fr 11vh;height:100vh;width:100vw}
+.app.adv-mode{
+  display:flex;flex-direction:column;
+  height:auto;min-height:100vh;
+  width:100vw;
+}
+
+/* ── HEADER ── */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 2.5vw;background:var(--surface);border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.logo{font-size:clamp(13px,1.4vw,20px);font-weight:800;letter-spacing:-.03em;display:flex;align-items:center;gap:.5vw}
+.la{color:var(--solar)}.ls{color:var(--muted);font-weight:300;margin:0 .4vw}.lb{color:var(--muted);font-weight:400}
+.hdr-right{display:flex;align-items:center;gap:1.5vw}
+
+/* View toggle */
+.view-btns{display:flex;gap:6px}
+.vbtn{
+  font-family:var(--sans);font-size:clamp(10px,.95vw,14px);font-weight:700;
+  padding:5px 14px;border-radius:6px;cursor:pointer;border:1px solid var(--border);
+  background:var(--s2);color:var(--muted);letter-spacing:.06em;text-transform:uppercase;
+  transition:all .2s;
+}
+.vbtn.active{background:var(--solar);color:#000;border-color:var(--solar)}
+.vbtn:hover:not(.active){border-color:var(--muted);color:var(--text)}
+.admin-btn{
+  font-family:var(--sans);font-size:clamp(9px,.82vw,12px);font-weight:700;
+  padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid rgba(245,166,35,.4);
+  background:transparent;color:var(--solar);letter-spacing:.06em;text-transform:uppercase;
+  text-decoration:none;transition:all .2s;display:inline-flex;align-items:center;gap:4px;
+}
+.admin-btn:hover{background:rgba(245,166,35,.12);border-color:var(--solar);}
+.signout-btn{
+  font-family:var(--sans);font-size:clamp(9px,.82vw,12px);font-weight:700;
+  padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid rgba(255,80,80,.35);
+  background:transparent;color:#ff6b6b;letter-spacing:.06em;text-transform:uppercase;
+  text-decoration:none;transition:all .2s;display:inline-flex;align-items:center;gap:4px;
+}
+.signout-btn:hover{background:rgba(255,80,80,.12);border-color:#ff6b6b;color:#ff8080;}
+
+/* Site selector */
+.site-wrap{display:flex;align-items:center;gap:.8vw}
+.site-lbl{font-size:clamp(9px,.9vw,13px);color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.age-badge{font-family:var(--mono);font-size:clamp(9px,.85vw,12px);color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:clamp(6px,.6vw,8px);height:clamp(6px,.6vw,8px);border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.dot.stale{background:var(--red);animation:none}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+
+select{
+  background:var(--s2);border:1px solid var(--border);color:var(--text);
+  font-family:var(--sans);font-size:clamp(10px,1vw,14px);font-weight:700;
+  padding:4px 28px 4px 10px;border-radius:6px;cursor:pointer;outline:none;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234a5070' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;
+}
+
+/* ── VIEWS ── */
+.view{display:none;width:100%;height:100%;overflow:hidden}
+.view.active{display:flex}
+
+/* ── BASIC VIEW — grid-tie specific ── */
+/* No SOC panel. Instead a slim stats panel on the left showing
+   live AC output, yield today, and grid export status. */
+#view-basic{flex-direction:row}
+
+.gt-stats-panel{
+  width:18vw;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2.5vh;padding:2vh 2vw;border-right:1px solid var(--border);position:relative;
+  overflow:hidden;flex-shrink:0;
+}
+/* Ambient glow changes with export state */
+.gt-stats-panel::before{content:'';position:absolute;inset:0;pointer-events:none;transition:opacity .8s;opacity:0}
+.gt-stats-panel.gt-on::before{background:radial-gradient(circle at 50% 40%,rgba(245,166,35,.12) 0%,transparent 68%);opacity:1}
+.gt-stats-panel.gt-idle::before{background:radial-gradient(circle at 50% 40%,rgba(128,144,184,.06) 0%,transparent 68%);opacity:1}
+
+/* Status badge */
+.gt-badge{
+  font-size:clamp(10px,1.1vw,16px);font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;padding:5px 16px;border-radius:20px;transition:all .4s;z-index:1;
+}
+.gt-on  .gt-badge{background:rgba(245,166,35,.15);color:var(--solar);border:1px solid rgba(245,166,35,.35)}
+.gt-idle.gt-badge,.gt-idle .gt-badge{background:rgba(128,144,184,.1);color:var(--muted);border:1px solid rgba(128,144,184,.2)}
+
+/* Big AC output number */
+.gt-power-wrap{display:flex;flex-direction:column;align-items:center;gap:.5vh;z-index:1}
+.gt-power-val{font-size:clamp(32px,5.5vw,80px);font-weight:800;font-family:var(--mono);line-height:1;letter-spacing:-.03em;transition:color .5s}
+.gt-power-lbl{font-size:clamp(9px,.85vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+
+/* Mini stats row: DC power, PF, freq */
+.gt-mini-row{display:flex;gap:clamp(12px,2vw,32px);z-index:1}
+.gt-mini{display:flex;flex-direction:column;align-items:center;gap:3px}
+.gt-mini-val{font-size:clamp(13px,1.4vw,22px);font-family:var(--mono);font-weight:600}
+.gt-mini-lbl{font-size:clamp(8px,.75vw,11px);color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+
+/* Yield today strip */
+.gt-yield{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  width:80%;background:var(--s2);border:1px solid var(--border);
+  border-radius:10px;padding:clamp(8px,1.2vh,16px) 12px;z-index:1;
+}
+.gt-yield-val{font-size:clamp(20px,2.8vw,44px);font-weight:800;font-family:var(--mono);color:var(--solar)}
+.gt-yield-lbl{font-size:clamp(8px,.75vw,12px);color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
+
+/* ── FLOW AREA — 3-node layout (Solar, Grid, Hub) ── */
+.flow-area{flex:1;position:relative;overflow:hidden}
+#flow-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.nc{
+  position:absolute;transform:translate(-50%,-50%);background:var(--surface);
+  border:1px solid var(--border);border-radius:clamp(10px,1.2vw,18px);
+  padding:clamp(12px,1.4vh,22px) clamp(14px,1.6vw,28px);
+  display:flex;flex-direction:column;align-items:center;gap:clamp(4px,.5vh,8px);
+  width:clamp(130px,14vw,220px);transition:border-color .4s,box-shadow .4s;
+}
+.n-ico{font-size:clamp(24px,3.2vw,52px);line-height:1}
+.n-lbl{font-size:clamp(9px,.85vw,13px);color:var(--muted);letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+.n-val{font-size:clamp(22px,3vw,48px);font-weight:800;font-family:var(--mono);line-height:1;letter-spacing:-.02em}
+.n-sub{font-size:clamp(9px,.85vw,13px);font-family:var(--mono);font-weight:500}
+.hub{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:clamp(4px,.5vh,8px)}
+.hub-ring{
+  width:clamp(62px,7.5vw,118px);height:clamp(62px,7.5vw,118px);border-radius:50%;
+  background:var(--surface);border:2px solid rgba(245,166,35,.35);
+  display:flex;align-items:center;justify-content:center;font-size:clamp(26px,3.2vw,52px);
+  box-shadow:0 0 clamp(16px,2vw,40px) rgba(245,166,35,.15),0 0 clamp(40px,5vw,80px) rgba(245,166,35,.06);
+  transition:box-shadow .5s,border-color .5s;
+}
+.hub-ring.on{box-shadow:0 0 clamp(22px,2.8vw,56px) rgba(245,166,35,.4),0 0 clamp(55px,6.5vw,110px) rgba(245,166,35,.12);border-color:rgba(245,166,35,.65)}
+.hub-lbl{font-size:clamp(8px,.75vw,11px);color:var(--muted);letter-spacing:.15em;text-transform:uppercase}
+@keyframes df{to{stroke-dashoffset:-28}}
+@keyframes dr{to{stroke-dashoffset:28}}
+.fl{fill:none;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:8 20}
+@media(max-width:768px),(orientation:portrait) and (max-width:1024px){
+  .fl{stroke-width:3.5;stroke-dasharray:10 16}
+}
+.fwd{animation:df 1s linear infinite}.rev{animation:dr 1s linear infinite}
+.idle{opacity:.1;animation:none}.slow{animation-duration:2s}.med{animation-duration:1.1s}.fast{animation-duration:.5s}
+
+/* ── ADVANCED VIEW ── */
+#view-adv{flex-direction:column;overflow:hidden;height:100%}
+.adv-inner{
+  flex:1;overflow:visible;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:320px 320px 380px 260px;
+  gap:1px;background:var(--border);width:100%;
+}
+.span2{grid-column:1/-1}
+.chart-panel{
+  background:var(--surface);padding:clamp(8px,1vh,14px) clamp(10px,1.2vw,18px);
+  display:flex;flex-direction:column;gap:6px;overflow:hidden;min-height:0;
+}
+.chart-title{font-size:clamp(11px,1vw,15px);font-weight:700;color:var(--text);letter-spacing:-.01em;flex-shrink:0}
+.chart-wrap{flex:1;position:relative;min-height:0;height:0}
+.chart-wrap canvas{width:100%!important;height:100%!important}
+
+/* Advanced stat rows */
+.adv-stats{grid-column:1/-1;display:flex;flex-direction:column;flex-shrink:0}
+.adv-row-a{display:flex;gap:1px;background:var(--border);height:min(12vh,100px);flex-shrink:0}
+.adv-row-b{display:flex;gap:1px;background:var(--border);height:min(5.5vh,50px);flex-shrink:0;border-top:2px solid var(--bg)}
+.adv-stat{flex:1;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0}
+.adv-row-a .adv-stat-lbl{font-size:clamp(8px,.75vw,11px);color:#a8b8d8;letter-spacing:.1em;text-transform:uppercase}
+.adv-row-a .adv-stat-val{font-size:clamp(16px,2.2vw,36px);font-family:var(--mono);font-weight:700}
+.adv-row-b .adv-stat-lbl{font-size:clamp(7px,.6vw,10px);color:#a8b8d8;letter-spacing:.08em;text-transform:uppercase}
+.adv-row-b .adv-stat-val{font-size:clamp(12px,1.1vw,18px);font-family:var(--mono);font-weight:600;color:var(--text)}
+
+/* Advanced footer pills */
+.adv-footer-stat{flex:1;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0}
+.adv-footer-lbl{font-size:clamp(7px,.6vw,10px);color:#a8b8d8;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;padding:0 4px;text-align:center}
+.adv-footer-val{font-size:clamp(11px,1.2vw,20px);font-family:var(--mono);font-weight:600}
+#footer-adv > div{gap:1px;background:var(--border)}
+
+/* ── FOOTER ── */
+footer{border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;overflow:hidden}
+.footer-hidden{display:none!important}
+#footer-basic{
+  display:flex;align-items:center;justify-content:center;
+  gap:clamp(8px,2.2vw,48px);padding:0 3vw;width:100%;height:100%;flex-wrap:wrap;
+}
+#footer-adv{display:flex;flex-direction:column;width:100%;height:100%}
+#footer-adv > div{display:flex;gap:1px;background:var(--border);flex:1}
+.stat{display:flex;flex-direction:column;align-items:center;gap:3px}
+.st-lbl{font-size:clamp(8px,.75vw,11px);color:#a8b8d8;letter-spacing:.1em;text-transform:uppercase}
+.st-val{font-size:clamp(13px,1.5vw,24px);font-family:var(--mono);font-weight:500}
+
+/* ── WEATHER STRIP ── */
+.wx-strip{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 2.5vw;height:clamp(32px,4vh,48px);
+  background:var(--s2);border-bottom:1px solid var(--border);
+  flex-shrink:0;gap:1.5vw;overflow:hidden;
+}
+.wx-left{display:flex;align-items:center;gap:1vw;flex-shrink:0}
+.wx-icon{font-size:clamp(16px,2vw,26px);line-height:1}
+.wx-desc{font-size:clamp(10px,.9vw,14px);color:var(--text);font-weight:600;white-space:nowrap}
+.wx-site{font-size:clamp(9px,.8vw,12px);color:var(--muted);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.wx-pills{display:flex;align-items:center;gap:clamp(6px,1.2vw,24px);flex-wrap:nowrap;overflow:hidden}
+.wx-pill{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0}
+.wx-pill-lbl{font-size:clamp(7px,.65vw,10px);color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.wx-pill-val{font-size:clamp(11px,1.1vw,17px);font-family:var(--mono);font-weight:600;color:var(--text);white-space:nowrap}
+.wx-right{display:flex;align-items:center;gap:1vw;flex-shrink:0}
+.wx-sun{font-size:clamp(9px,.8vw,12px);color:var(--muted);font-family:var(--mono);white-space:nowrap}
+.wx-cloud-wrap{display:flex;align-items:center;gap:6px}
+.wx-cloud-bar{width:clamp(40px,5vw,80px);height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.wx-cloud-fill{height:100%;border-radius:3px;background:var(--muted);transition:width .8s ease}
+.wx-strip.wx-empty{opacity:.4}
+
+/* Grid status pill */
+#grid-pill{
+  display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:1px solid var(--border);
+  background:var(--s2);font-family:var(--sans);font-size:clamp(9px,.85vw,13px);font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;transition:background .4s,border-color .4s,color .4s;white-space:nowrap;
+}
+#grid-pill .gp-dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+#grid-pill.gp-on {color:var(--green);border-color:rgba(46,204,113,.35)}
+#grid-pill.gp-export{color:var(--solar);border-color:rgba(245,166,35,.4)}
+#grid-pill.gp-idle{color:var(--muted);border-color:var(--border)}
+#grid-pill.gp-off{color:var(--red);border-color:rgba(231,76,60,.45);background:rgba(231,76,60,.08)}
+#grid-pill.gp-off .gp-dot{animation:pulse 1.2s infinite}
+
+/* ── OFFLINE BANNER ── */
+#offline-banner{
+  position:fixed;bottom:0;left:0;right:0;z-index:9999;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  padding:10px 16px;background:rgba(231,76,60,.95);color:#fff;
+  font-family:var(--sans);font-size:clamp(12px,1.2vw,14px);font-weight:600;letter-spacing:.04em;
+  transform:translateY(100%);transition:transform .35s cubic-bezier(.4,0,.2,1);backdrop-filter:blur(4px);
+}
+#offline-banner.visible{transform:translateY(0)}
+#offline-banner .ob-dot{width:8px;height:8px;border-radius:50%;background:#fff;animation:pulse 1.5s infinite;flex-shrink:0}
+
+/* Crosshair tooltip */
+.ch-crosshair-label{
+  position:fixed;background:rgba(17,19,24,.92);border:1px solid var(--border);
+  color:var(--muted);font-family:var(--mono);font-size:11px;
+  padding:2px 6px;border-radius:4px;pointer-events:none;
+  transform:translateX(-50%);white-space:nowrap;z-index:100;
+}
+
+/* ── MOBILE ── */
+@media(max-width:768px),(orientation:portrait) and (max-width:1024px){
+  html,body{overflow:auto}
+  .app{grid-template-rows:auto auto 1fr auto;min-height:100vh;height:auto}
+  header{flex-wrap:wrap;gap:6px;padding:8px 12px;height:auto;min-height:48px}
+  .logo{font-size:15px}
+  .hdr-right{flex-wrap:wrap;gap:6px;width:100%;justify-content:flex-start}
+  .age-badge{margin-left:auto}
+  .vbtn{padding:7px 16px;font-size:12px}
+  #view-basic{flex-direction:column;height:auto;min-height:0}
+  /* Stats panel: compact horizontal strip on mobile */
+  .gt-stats-panel{
+    width:100%;flex-direction:row;border-right:none;border-bottom:1px solid var(--border);
+    padding:8px 14px;gap:12px;justify-content:flex-start;align-items:center;
+    flex-shrink:0;min-height:0;max-height:110px;
+  }
+  .gt-power-val{font-size:clamp(22px,6vw,38px)}
+  .gt-yield-val{font-size:clamp(16px,5vw,28px)}
+  .gt-mini-row{gap:10px}
+  .gt-mini-val{font-size:clamp(11px,3.5vw,18px)}
+  .flow-area{width:100%;aspect-ratio:1.2/1;min-height:240px;max-height:380px;flex-shrink:0}
+  .nc{width:clamp(95px,24vw,140px);padding:8px 10px;border-radius:10px;gap:3px}
+  .n-ico{font-size:clamp(20px,5.5vw,32px)}
+  .n-val{font-size:clamp(15px,5vw,26px)}
+  .n-lbl{font-size:9px}
+  .n-sub{font-size:9px}
+  .hub-ring{width:clamp(48px,12vw,68px);height:clamp(48px,12vw,68px);font-size:clamp(20px,5.5vw,32px)}
+  .hub-lbl{font-size:8px}
+  footer{height:auto;padding:0}
+  #footer-basic{padding:8px 12px;gap:0;justify-items:center;align-items:center;width:100%}
+  #footer-basic:not(.footer-hidden){display:grid!important;grid-template-columns:repeat(4,1fr)}
+  #footer-basic #clock-wrap{display:none}
+  #footer-adv{flex-direction:column!important}
+  #footer-adv > div:first-child{display:grid!important;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);flex:none!important}
+  #footer-adv > div:last-child{display:grid!important;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);flex:none!important}
+  #footer-adv > div:last-child > div:nth-child(1),
+  #footer-adv > div:last-child > div:nth-child(2){display:none!important}
+  #footer-adv .adv-footer-stat{padding:4px 2px}
+  #footer-adv .adv-footer-val{font-size:clamp(10px,3.5vw,16px)}
+  #footer-adv .adv-footer-lbl{font-size:clamp(6px,1.8vw,9px)}
+  .st-lbl{font-size:9px}
+  .st-val{font-size:clamp(12px,3.5vw,18px)}
+  #clock{font-size:clamp(12px,3.5vw,18px)!important;font-weight:500!important}
+  .wx-strip{height:auto;flex-wrap:wrap;padding:5px 10px;gap:6px}
+  .wx-pills{flex-wrap:wrap;gap:6px 10px}
+  .wx-pill{min-width:52px}
+  .wx-right{display:none}
+  .adv-inner{grid-template-columns:1fr;grid-template-rows:none;overflow-y:auto;height:auto}
+  .adv-inner .chart-panel{min-height:220px}
+  .adv-row-a{height:auto;flex-wrap:wrap}
+  .adv-row-b{display:none!important}
+  .adv-row-a .adv-stat{flex:0 0 33.333%;min-width:0;padding:5px 3px;border-bottom:1px solid var(--border)}
+  .adv-row-a .adv-stat-lbl{font-size:8px}
+  .adv-row-a .adv-stat-val{font-size:clamp(13px,4vw,20px)}
+}
+@media(max-width:380px){
+  .nc{width:80px;padding:6px 7px}
+  .n-val{font-size:13px}
+  .st-val{font-size:11px}
+  .adv-stat{flex:0 0 50%}
+}
+</style>
+</head>
+<body>
+
+<!-- Offline banner -->
+<div id="offline-banner" role="alert" aria-live="polite">
+  <div class="ob-dot"></div>
+  <span>You're offline — showing last known data</span>
+</div>
+
+<!-- Stale data banner -->
+<div id="stale-banner" role="alert" aria-live="polite" style="
+  position:fixed;bottom:0;left:0;right:0;z-index:9998;
+  display:none;align-items:center;justify-content:center;gap:10px;
+  padding:10px 16px;background:rgba(243,156,18,.95);color:#000;
+  font-family:var(--sans);font-size:clamp(12px,1.2vw,14px);font-weight:600;
+  transform:translateY(100%);transition:transform .3s ease;
+">
+  <div style="width:8px;height:8px;border-radius:50%;background:#000;animation:pulse 1.5s infinite;flex-shrink:0"></div>
+  <span id="stale-banner-msg">Data is stale — inverter may be offline</span>
+</div>
+
+<div class="app">
+
+<!-- HEADER -->
+<header>
+  <div class="logo"><span class="la">◆</span> SolarWatch <span class="ls">/</span> <span class="lb" id="view-label">Power Flow</span><span style="font-size:clamp(8px,.65vw,10px);color:#5a6a8a;margin-left:8px;font-family:var(--mono)">v{{ APP_VERSION }}</span></div>
+  <div class="hdr-right">
+
+    <!-- Site selector -->
+    <div class="site-wrap">
+      <span class="site-lbl">Site</span>
+      <select id="site-sel" aria-label="Select site" onchange="onSiteChange()"></select>
+    </div>
+
+    <!-- View toggle -->
+    <div class="view-btns">
+      <button class="vbtn active" id="vbtn-basic" onclick="setView('basic')">Basic</button>
+      <button class="vbtn" id="vbtn-adv" onclick="setView('adv')">Advanced</button>
+    </div>
+
+    <!-- Nav buttons -->
+    {% if current_user %}
+      {% if current_user.role_name == "admin" %}
+        <a class="admin-btn" href="/auth/admin" title="Admin console">⚙ Admin</a>
+      {% elif current_user.role_name == "site_admin" %}
+        <a class="admin-btn" href="/my-sites" title="My sites">⚙ My Sites</a>
+      {% endif %}
+      <a class="signout-btn" href="/auth/logout" title="Sign out">⏻ Sign out</a>
+    {% endif %}
+
+    <!-- Age badge + yield today badge + efficiency badge + grid status pill -->
+    <div class="age-badge"><div class="dot" id="dot"></div><span id="age">—</span></div>
+    <!-- Yield today — always visible day and night, resets at midnight -->
+    <div id="yield-badge" style="
+      font-family:var(--mono);font-size:clamp(9px,.85vw,13px);font-weight:600;
+      padding:4px 10px;border-radius:6px;border:1px solid rgba(245,166,35,.3);
+      background:var(--s2);white-space:nowrap;
+    " title="Yield today">
+      <span style="font-size:clamp(7px,.65vw,10px);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">☀ </span><span id="yield-badge-val" style="color:var(--solar)">— kWh</span>
+    </div>
+    <!-- DC→AC conversion efficiency — meaningful for commercial grid-tie monitoring.
+         Only shown during daylight when DC input > 0. Hidden at night (shows nothing). -->
+    <div id="eff-badge" style="
+      font-family:var(--mono);font-size:clamp(9px,.85vw,13px);font-weight:600;
+      padding:4px 10px;border-radius:6px;border:1px solid var(--border);
+      background:var(--s2);color:var(--muted);white-space:nowrap;
+      transition:color .4s,border-color .4s;display:none;
+    " title="DC→AC conversion efficiency">
+      <span style="font-size:clamp(7px,.65vw,10px);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">η </span><span id="eff-val">—</span>
+    </div>
+    <div id="grid-pill" class="gp-export" role="status" aria-live="polite" aria-label="Grid status">
+      <div class="gp-dot"></div>
+      <span id="grid-pill-txt">Exporting</span>
+    </div>
+  </div>
+</header>
+
+<!-- WEATHER STRIP -->
+<div class="wx-strip wx-empty" id="wx-strip">
+  <div class="wx-left">
+    <span class="wx-icon" id="wx-icon">—</span>
+    <div>
+      <div class="wx-desc" id="wx-desc">Loading weather…</div>
+      <div class="wx-site" id="wx-site">—</div>
+    </div>
+  </div>
+  <div class="wx-pills">
+    <div class="wx-pill"><span class="wx-pill-lbl">Temp</span><span class="wx-pill-val" id="wx-temp">—</span></div>
+    <div class="wx-pill"><span class="wx-pill-lbl">Feels</span><span class="wx-pill-val" id="wx-feels">—</span></div>
+    <div class="wx-pill">
+      <span class="wx-pill-lbl">Cloud</span>
+      <span class="wx-pill-val">
+        <span class="wx-cloud-wrap">
+          <span id="wx-cloud-pct">—</span>
+          <span class="wx-cloud-bar"><span class="wx-cloud-fill" id="wx-cloud-bar"></span></span>
+        </span>
+      </span>
+    </div>
+    <div class="wx-pill"><span class="wx-pill-lbl">Rain/hr</span><span class="wx-pill-val" id="wx-rain">—</span></div>
+    <div class="wx-pill"><span class="wx-pill-lbl">Wind</span><span class="wx-pill-val" id="wx-wind">—</span></div>
+    <div class="wx-pill"><span class="wx-pill-lbl">Humidity</span><span class="wx-pill-val" id="wx-hum">—</span></div>
+    <div class="wx-pill"><span class="wx-pill-lbl">UV</span><span class="wx-pill-val" id="wx-uv">—</span></div>
+    <div class="wx-pill" id="wx-rad-pill">
+      <span class="wx-pill-lbl" id="wx-rad-lbl">Solar Rad</span>
+      <span class="wx-pill-val" id="wx-rad">—</span>
+    </div>
+  </div>
+  <div class="wx-right">
+    <span class="wx-sun" id="wx-sun">🌅 — · 🌇 —</span>
+  </div>
+</div>
+
+<!-- VIEWS -->
+<main style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+
+  <!-- BASIC VIEW — grid-tie: stats panel left, 3-node power flow right -->
+  <div class="view active" id="view-basic">
+
+    <!-- Left panel: AC output, yield today, DC power, PF, frequency -->
+    <div class="gt-stats-panel gt-on" id="gsp">
+      <div class="gt-badge" id="gt-badge">GENERATING</div>
+      <div class="gt-power-wrap">
+        <span class="gt-power-val" id="gt-power" style="color:var(--solar)">—</span>
+        <span class="gt-power-lbl">AC Output</span>
+      </div>
+      <div class="gt-yield">
+        <span class="gt-yield-val" id="gt-yield-today">— kWh</span>
+        <span class="gt-yield-lbl">Yield Today</span>
+      </div>
+      <div class="gt-mini-row">
+        <div class="gt-mini">
+          <span class="gt-mini-val" id="gt-dc">—</span>
+          <span class="gt-mini-lbl">DC</span>
+        </div>
+        <div class="gt-mini">
+          <span class="gt-mini-val" id="gt-pf">—</span>
+          <span class="gt-mini-lbl">PF</span>
+        </div>
+        <div class="gt-mini">
+          <span class="gt-mini-val" id="gt-freq">—</span>
+          <span class="gt-mini-lbl">Hz</span>
+        </div>
+        <div class="gt-mini">
+          <span class="gt-mini-val" id="gt-temp">—</span>
+          <span class="gt-mini-lbl">Temp</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: 3-node flow diagram — Solar → Inverter → Grid -->
+    <div class="flow-area" id="fa">
+      <svg id="flow-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <!-- Inverter hub — centre -->
+      <div class="hub" id="hub" style="left:50%;top:50%">
+        <div class="hub-ring" id="hring">⚡</div>
+        <span class="hub-lbl">Inverter</span>
+      </div>
+      <!-- Solar PV — top centre -->
+      <div class="nc" id="nd-solar" style="left:50%;top:20%">
+        <span class="n-ico">☀️</span><span class="n-lbl">Solar</span>
+        <span class="n-val" id="v-solar" style="color:var(--solar)">—</span>
+        <span class="n-sub" id="s-solar" style="color:var(--muted)">DC input</span>
+      </div>
+      <!-- Grid — bottom right: shows export power and voltage -->
+      <div class="nc" id="nd-grid" style="left:75%;top:75%">
+        <span class="n-ico">🔌</span><span class="n-lbl">Grid</span>
+        <span class="n-val" id="v-grid">—</span>
+        <span class="n-sub" id="s-grid">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADVANCED VIEW — grid-tie: PV chart, Grid chart, Daily chart, Temps -->
+  <div class="view" id="view-adv">
+    <!-- Stat rows -->
+    <div class="adv-stats" id="adv-stats">
+      <!-- Row A: key operational stats -->
+      <div class="adv-row-a">
+        <div class="adv-stat"><span class="adv-stat-lbl">AC Output</span><span class="adv-stat-val" id="a-ac" style="color:var(--solar)">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">PV Today</span><span class="adv-stat-val" id="a-pv-today" style="color:var(--solar)">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Grid Export</span><span class="adv-stat-val" id="a-export" style="color:var(--green)">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Total Yield</span><span class="adv-stat-val" id="a-total" style="color:var(--green)">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">DC Power</span><span class="adv-stat-val" id="a-dc">—</span></div>
+      </div>
+      <!-- Row B: technical + peaks -->
+      <div class="adv-row-b" id="tech-stats">
+        <div class="adv-stat"><span class="adv-stat-lbl">Grid V</span><span class="adv-stat-val" id="a-gv">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Frequency</span><span class="adv-stat-val" id="a-hz">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Power Factor</span><span class="adv-stat-val" id="a-pf">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Inv Temp</span><span class="adv-stat-val" id="a-temp">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Peak Solar</span><span class="adv-stat-val" id="a-peak-pv" style="color:var(--solar)">—</span></div>
+        <div class="adv-stat"><span class="adv-stat-lbl">Peak Export</span><span class="adv-stat-val" id="a-peak-grid" style="color:var(--green)">—</span></div>
+      </div>
+    </div>
+    <!-- Chart grid — 4 panels for grid-tie -->
+    <div class="adv-inner" id="adv-inner">
+      <div class="chart-panel span2"><div class="chart-title">☀️ Solar PV Power — Per Inverter &amp; Combined</div><div class="chart-wrap"><canvas id="ch-pv"></canvas></div></div>
+      <div class="chart-panel span2"><div class="chart-title">🔌 Grid Power &amp; Voltage</div><div class="chart-wrap"><canvas id="ch-grid"></canvas></div></div>
+      <div class="chart-panel span2"><div class="chart-title">📊 Daily Energy — Combined Site (Last 14 Days)</div><div class="chart-wrap"><canvas id="ch-daily"></canvas></div></div>
+      <div class="chart-panel span2 temp-panel" id="temp-panel-wrap">
+        <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleTemps()">
+          <span>🌡️ Inverter Temperatures</span>
+          <span id="temp-toggle-icon" style="font-size:clamp(10px,.9vw,14px);color:var(--muted);letter-spacing:.06em">▼ HIDE</span>
+        </div>
+        <div class="chart-wrap" id="temp-chart-wrap"><canvas id="ch-temp"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- FOOTER -->
+<footer id="main-footer">
+
+  <!-- BASIC MODE footer -->
+  <div id="footer-basic">
+    <div class="stat"><span class="st-lbl">PV Today</span><span class="st-val" id="f-pv" style="color:var(--solar)">—</span></div>
+    <div class="stat"><span class="st-lbl">DC Power</span><span class="st-val" id="f-dc">—</span></div>
+    <div class="stat"><span class="st-lbl">Grid Export</span><span class="st-val" id="f-export" style="color:var(--green)">—</span></div>
+    <div class="stat"><span class="st-lbl">Grid V</span><span class="st-val" id="f-gv">—</span></div>
+    <div class="stat"><span class="st-lbl">Frequency</span><span class="st-val" id="f-hz">—</span></div>
+    <div class="stat"><span class="st-lbl">Power Factor</span><span class="st-val" id="f-pf">—</span></div>
+    <div class="stat"><span class="st-lbl">Month PV</span><span class="st-val" id="f-mpv" style="color:var(--solar)">—</span></div>
+    <div class="stat"><span class="st-lbl">Total Yield</span><span class="st-val" id="f-total" style="color:var(--green)">—</span></div>
+    <div class="stat" id="clock-wrap" onclick="toggleClock()" title="Click to toggle clock" style="cursor:pointer;margin-left:auto;padding-left:clamp(8px,2vw,32px);opacity:0.4;transition:opacity .2s" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=clockVisible?1:0.4">
+      <span class="st-lbl">Time</span>
+      <span class="st-val" id="clock" style="font-family:var(--mono);color:var(--muted);font-size:clamp(20px,2.4vw,40px);font-weight:600">--:--:--</span>
+    </div>
+  </div>
+
+  <!-- ADVANCED MODE footer -->
+  <div id="footer-adv" class="footer-hidden">
+    <!-- Row 1: daily + monthly energy -->
+    <div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">PV Today</span><span class="adv-footer-val" id="fa-pv" style="color:var(--solar)">—</span></div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Grid Export Today</span><span class="adv-footer-val" id="fa-export" style="color:var(--green)">—</span></div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Month PV</span><span class="adv-footer-val" id="fa-mpv" style="color:var(--solar)">—</span></div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Total Yield</span><span class="adv-footer-val" id="fa-total" style="color:var(--green)">—</span></div>
+    </div>
+    <!-- Row 2: technical + peaks -->
+    <div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Grid V</span><span class="adv-footer-val" id="fa-gv">—</span></div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Frequency</span><span class="adv-footer-val" id="fa-hz">—</span></div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Peak Solar</span><span class="adv-footer-val" id="fa-peak-pv" style="color:var(--solar)">—</span></div>
+      <div class="adv-footer-stat"><span class="adv-footer-lbl">Peak Export</span><span class="adv-footer-val" id="fa-peak-grid" style="color:var(--green)">—</span></div>
+    </div>
+  </div>
+
+</footer>
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────────────────
+// Grid-tie dashboard — no battery state, no SOC, no self-sufficiency.
+// Primary metrics: AC output, yield today, grid export, lifetime yield.
+
+// Topologies that use the grid-tie (this) template — no page reload needed between these.
+const GRIDTIE_TOPOLOGIES = new Set(['grid_tie','grid_tie_three_phase']);
+
+// Site topology cache — populated by loadSites(), consulted by onSiteChange()
+// to detect when switching sites requires serving a different HTML template.
+let _siteTopologies = {};
+
+let currentSite=null, currentView='basic';
+let clockVisible=false, clockTimer=null;
+let liveTimer=null, chartTimer=null;
+let charts={};
+window._ld=null;
+
+// ── VIEW MANAGEMENT ───────────────────────────────────────────────────────────
+function setView(v){
+  currentView=v;
+  document.getElementById('view-basic').className='view'+(v==='basic'?' active':'');
+  document.getElementById('view-adv').className='view'+(v==='adv'?' active':'');
+  document.getElementById('vbtn-basic').className='vbtn'+(v==='basic'?' active':'');
+  document.getElementById('vbtn-adv').className='vbtn'+(v==='adv'?' active':'');
+  document.getElementById('view-label').textContent=v==='basic'?'Power Flow':'Advanced';
+  const fb=document.getElementById('footer-basic');
+  const fa=document.getElementById('footer-adv');
+  fb.classList.toggle('footer-hidden', v!=='basic');
+  fa.classList.toggle('footer-hidden', v!=='adv');
+  const ts=document.getElementById('tech-stats');
+  if(ts) ts.style.display=v==='adv'?'none':'flex';
+  document.querySelector('.app').className='app'+(v==='adv'?' adv-mode':'');
+  document.documentElement.classList.toggle('adv-scroll', v==='adv');
+  if(v==='adv'){window.scrollTo(0,0); loadCharts();}
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function fmt(w){const n=parseFloat(w)||0;const a=Math.abs(n);return a>=1000?(a/1000).toFixed(1)+' kW':Math.round(a)+' W'}
+function fmtKwh(v){const n=parseFloat(v)||0;return n>=1000?(n/1000).toFixed(1)+' MWh':n.toFixed(1)+' kWh'}
+function spd(w){const a=Math.abs(w);if(a<15)return 'idle';if(a<600)return 'slow';if(a<2500)return 'med';return 'fast'}
+function fdir(w){if(Math.abs(w)<15)return 'idle';return w>0?'fwd':'rev'}
+
+// ── GRID PILL — grid-tie specific states ──────────────────────────────────────
+/**
+ * updateGridPill(d) — refresh the header pill for a grid-tie inverter.
+ *
+ * States for grid-tie (no battery):
+ *   gp-export  — actively exporting power to the grid (normal daytime operation)
+ *   gp-idle    — inverter in standby / night / dawn / dusk — grid is fine
+ *   gp-off     — genuine grid failure (voltage absent AND inverter was running)
+ *
+ * Important: a Sungrow inverter in Standby reports grid_v = 0 because it stops
+ * measuring when not generating. We must NOT treat standby as "Grid Off".
+ * We use solar_w (AC output) as a proxy for inverter activity — if the inverter
+ * has been generating recently (solar_w > 15 at last reading) AND grid_v has
+ * collapsed, that is a genuine grid failure. Pure standby shows solar_w = 0.
+ *
+ * @param {Object} d — live data from /api/solar/flow
+ */
+function updateGridPill(d){
+  const pill=document.getElementById('grid-pill');
+  const txt=document.getElementById('grid-pill-txt');
+  if(!pill||!txt) return;
+
+  const exporting   = d.grid_w !== null && -d.grid_w > 15; // negative = exporting
+  const generating  = d.solar_w > 15;
+  // Only flag grid off if inverter was actively generating but grid_v collapsed.
+  // During standby (night) grid_v = 0 is normal — not a fault.
+  const gridOff     = generating && d.grid_v < 180;
+
+  if(gridOff){
+    pill.className='gp-off';
+    txt.textContent='⚡ Grid Off';
+  } else if(exporting){
+    const exp = Math.abs(d.grid_w);
+    pill.className='gp-export';
+    txt.textContent='Exporting';
+  } else {
+    // Standby / night / dawn / dusk — grid is available, just not exporting
+    pill.className='gp-idle';
+    txt.textContent='Grid Idle';
+  }
+}
+
+// ── FLOW LINES — 3-node layout ────────────────────────────────────────────────
+/**
+ * drawLines(d) — draw animated flow arrows on the SVG overlay.
+ *
+ * Grid-tie layout (3 nodes):
+ *   Solar (top-left) → Hub (centre)  : always forward when generating
+ *   Hub (centre)     → Grid (top-right): forward = exporting (normal)
+ *   Hub (centre)     → Yield (bottom-right): static dim line (no flow, just info node)
+ *
+ * @param {Object} d — live data object
+ */
+function drawLines(d){
+  const fa=document.getElementById('fa');
+  const svg=document.getElementById('flow-svg');
+  const W=fa.offsetWidth,H=fa.offsetHeight;
+  if(!W||!H) return;
+
+  // Node positions — mirror the HTML style left/top values
+  // Layout: Solar top-centre, Inverter hub centre, Grid bottom-right
+  // Mirrors the iSolarCloud power flow diagram convention.
+  const pos={
+    hub:  {x:W*.50, y:H*.50},
+    solar:{x:W*.50, y:H*.20},
+    grid: {x:W*.75, y:H*.75},
+  };
+
+  // Grid export: grid_w is negative (export = negative in SolarWatch convention)
+  const gridExport = -d.grid_w; // positive when exporting
+  const gc = gridExport>15 ? 'var(--gout)' : 'var(--muted)';
+
+  const pad=Math.min(W,H)*.09;
+  function seg(a,b,di,sp,col){
+    const dx=b.x-a.x,dy=b.y-a.y,len=Math.sqrt(dx*dx+dy*dy);
+    const ux=dx/len,uy=dy/len;
+    const x1=a.x+ux*pad,y1=a.y+uy*pad,x2=b.x-ux*pad,y2=b.y-uy*pad;
+    const mx=(x1+x2)/2+(dy/len)*18,my=(y1+y2)/2-(dx/len)*18;
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',`M${x1},${y1} Q${mx},${my} ${x2},${y2}`);
+    p.setAttribute('class',`fl ${di} ${sp}`);
+    p.setAttribute('stroke',col);
+    return p;
+  }
+
+  svg.innerHTML='';
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  // Solar → Hub: always forward when generating
+  svg.appendChild(seg(pos.solar,pos.hub,fdir(d.solar_w),spd(d.solar_w),'var(--solar)'));
+  // Hub → Grid: forward = exporting (normal daytime operation)
+  svg.appendChild(seg(pos.hub,pos.grid,gridExport>15?'fwd':'idle',spd(gridExport),gc));
+}
+
+// ── RENDER BASIC VIEW ─────────────────────────────────────────────────────────
+/**
+ * render(d) — update all live elements from the latest /api/solar/flow response.
+ *
+ * Grid-tie specifics:
+ *   solar_w  = pv1_power (total AC output, stored in pv1_power by sungrow_worker)
+ *   grid_w   = negative when exporting (SolarWatch convention)
+ *   batt_w   = 0 / null (no battery)
+ *   soc      = 0 (unused — no battery)
+ *   grid_v   = average phase voltage
+ *   grid_hz  = grid frequency
+ *
+ * @param {Object} d — live data from /api/solar/flow
+ */
+function render(d){
+  window._ld=d;
+
+  const acW     = d.solar_w || 0;           // AC output power (W)
+  const gridW   = d.grid_w  || 0;           // negative = exporting
+  const exportW = Math.max(0, -gridW);      // watts being exported
+  const gridV   = d.grid_v  || 0;
+  const gridHz  = d.grid_hz || 0;
+  const pvToday = d.daily_pv_kwh ?? 0;
+  // pvTotal defined above from d.total_pv_energy
+  // dc_temp column is repurposed for DC power by sungrow_worker (kW stored as W in dc_temp)
+  const dcW     = d.dc_power_w    || 0;   // DC input power (W) — from dc_temp column via _get_flow
+  const invTemp = d.inverter_temp  || 0;   // inverter internal temperature (°C)
+  const pvTotal = d.total_pv_energy || null; // lifetime yield (kWh) — null if never polled
+
+  // DC→AC conversion efficiency (%).
+  // Only meaningful when DC input > 0 (daytime operation).
+  // A healthy Sungrow SG125CX-P2 should show 97–99% at rated load.
+  // Values below 95% at normal load may indicate a fault worth investigating.
+  const effPct = dcW > 50 ? Math.min(99.9, (acW / dcW) * 100) : null;
+  const effBadge = document.getElementById('eff-badge');
+  const effVal   = document.getElementById('eff-val');
+  if(effBadge && effVal){
+    if(effPct !== null){
+      effVal.textContent = effPct.toFixed(1) + '%';
+      effBadge.style.display = '';
+      // Colour-code: green ≥97%, amber 94-97%, red <94%
+      const effColor = effPct >= 97 ? 'var(--green)' : effPct >= 94 ? 'var(--amber)' : 'var(--red)';
+      effBadge.style.color       = effColor;
+      effBadge.style.borderColor = effPct >= 97
+        ? 'rgba(46,204,113,.35)'
+        : effPct >= 94
+          ? 'rgba(243,156,18,.35)'
+          : 'rgba(231,76,60,.35)';
+    } else {
+      effBadge.style.display = 'none'; // hide at night — no DC input
+    }
+  }
+
+  // Stats panel state
+  const isGenerating = acW > 50;
+  const panel = document.getElementById('gsp');
+  const badge = document.getElementById('gt-badge');
+  panel.className = 'gt-stats-panel ' + (isGenerating ? 'gt-on' : 'gt-idle');
+  badge.textContent = isGenerating ? 'GENERATING' : (acW > 5 ? 'LOW OUTPUT' : 'OFFLINE');
+
+  // AC output — big number
+  const pwrEl = document.getElementById('gt-power');
+  pwrEl.textContent = fmt(acW);
+  pwrEl.style.color = isGenerating ? 'var(--solar)' : 'var(--muted)';
+
+  // Yield today
+  document.getElementById('gt-yield-today').textContent = pvToday + ' kWh';
+  // Also update header yield badge — visible in both basic and advanced views
+  const yb = document.getElementById('yield-badge-val');
+  if(yb) yb.textContent = pvToday + ' kWh';
+
+  // Mini stats: DC, PF, Hz, Temp — populated from flow data where available
+  document.getElementById('gt-dc').textContent   = dcW > 0  ? fmt(dcW)               : '—';
+  document.getElementById('gt-freq').textContent = gridHz   ? gridHz.toFixed(2) + 'Hz': '—';
+
+  // Nodes
+  document.getElementById('v-solar').textContent = fmt(acW);
+  document.getElementById('s-solar').textContent = dcW > 0 ? fmt(dcW) + ' DC' : 'DC input';
+  document.getElementById('nd-solar').style.cssText += `;border-color:${acW>50?'rgba(245,166,35,.45)':''};box-shadow:${acW>50?'0 0 20px rgba(245,166,35,.08)':'none'}`;
+
+  // Grid node — shows export power and voltage
+  const gridExport = Math.abs(gridW) > 15 ? exportW : 0;
+  document.getElementById('v-grid').textContent   = fmt(gridExport);
+  document.getElementById('v-grid').style.color   = gridExport > 0 ? 'var(--gout)' : 'var(--muted)';
+  document.getElementById('s-grid').textContent   = gridExport > 0 ? 'Exporting' : (gridV ? gridV.toFixed(0) + 'V' : 'Idle');
+  document.getElementById('s-grid').style.color   = gridExport > 0 ? 'var(--gout)' : 'var(--muted)';
+  document.getElementById('nd-grid').style.borderColor = gridExport > 0 ? 'rgba(46,204,113,.4)' : '';
+
+  // Total yield — shown in footer and header badge only (not on canvas)
+
+  // Hub glow
+  document.getElementById('hring').className = 'hub-ring' + (isGenerating ? ' on' : '');
+
+  // Advanced stat row A
+  document.getElementById('a-ac').textContent      = fmt(acW);
+  document.getElementById('a-pv-today').textContent = pvToday + ' kWh';
+  document.getElementById('a-export').textContent  = fmt(gridExport);
+  document.getElementById('a-total').textContent   = pvTotal !== null ? fmtKwh(pvTotal) : '—';
+  document.getElementById('a-dc').textContent      = dcW > 0 ? fmt(dcW) : '—';
+
+  // Advanced stat row B
+  document.getElementById('a-gv').textContent   = gridV   ? gridV.toFixed(0)   + 'V'  : '—';
+  document.getElementById('a-hz').textContent   = gridHz  ? gridHz.toFixed(2)  + 'Hz' : '—';
+  document.getElementById('a-pf').textContent   = '—'; // populated by chart peaks data
+  document.getElementById('a-temp').textContent = invTemp > 5 ? invTemp.toFixed(1) + '°C' : '—';
+
+  // Footer basic
+  document.getElementById('f-pv').textContent     = pvToday + ' kWh';
+  document.getElementById('f-dc').textContent     = dcW > 0 ? fmt(dcW) : '—';
+  document.getElementById('f-export').textContent = gridExport > 0 ? fmt(gridExport) : '—';
+  document.getElementById('f-gv').textContent     = gridV  ? gridV.toFixed(0)  + 'V'  : '—';
+  document.getElementById('f-hz').textContent     = gridHz ? gridHz.toFixed(2) + 'Hz' : '—';
+  document.getElementById('f-pf').textContent     = '—';
+  document.getElementById('f-total').textContent  = pvTotal !== null ? fmtKwh(pvTotal) : '—';
+
+  // Footer advanced
+  document.getElementById('fa-pv').textContent     = pvToday + ' kWh';
+  document.getElementById('fa-export').textContent = gridExport > 0 ? fmt(gridExport) : '—';
+  document.getElementById('fa-total').textContent  = pvTotal !== null ? fmtKwh(pvTotal) : '—';
+  document.getElementById('fa-gv').textContent     = gridV  ? gridV.toFixed(0)  + 'V'  : '—';
+  document.getElementById('fa-hz').textContent     = gridHz ? gridHz.toFixed(2) + 'Hz' : '—';
+
+  // Age badge
+  document.getElementById('dot').className = 'dot' + (d.stale ? ' stale' : '');
+  document.getElementById('age').textContent = d.age_s !== null ? d.age_s + 's ago' : 'live';
+
+  // Stale banner
+  const staleBanner = document.getElementById('stale-banner');
+  if(staleBanner){
+    if(d.stale && d.age_s !== null){
+      const mins = Math.round(d.age_s / 60);
+      document.getElementById('stale-banner-msg').textContent =
+        mins > 1
+          ? `Data is ${mins} minutes old — inverter or collector may be offline`
+          : 'Data is stale — inverter may be offline';
+      staleBanner.style.display = 'flex';
+      setTimeout(()=> staleBanner.style.transform = 'translateY(0)', 10);
+    } else {
+      staleBanner.style.transform = 'translateY(100%)';
+      setTimeout(()=>{ if(!d.stale) staleBanner.style.display='none'; }, 300);
+    }
+  }
+
+  drawLines(d);
+  updateGridPill(d);
+}
+
+// ── CHART HELPERS ─────────────────────────────────────────────────────────────
+// Identical to dashboard.html — same Chart.js options factory.
+const DUMMY_RIGHT_AXIS={position:'right',display:true,grid:{display:false},border:{display:false},
+  ticks:{display:false,color:'transparent'},afterFit(scale){const m=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);scale.width=m?36:46;}};
+
+function mkOpts(){
+  const isMob=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);
+  const lgnd={color:'#8e9bc0',font:{size:isMob?12:11,family:"'Barlow',sans-serif"},boxWidth:12,padding:isMob?8:10};
+  return {
+    responsive:true,maintainAspectRatio:false,animation:{duration:400},
+    plugins:{
+      legend:{display:!isMob,labels:lgnd},
+      tooltip:{mode:'index',intersect:false,backgroundColor:'rgba(17,19,24,.95)',titleColor:'#e8eaf2',bodyColor:'#8e9bc0',borderColor:'#232736',borderWidth:1},
+      crosshair:{}
+    },
+    scales:{
+      x:{type:'time',time:{tooltipFormat:'HH:mm',displayFormats:{minute:'HH:mm',hour:'HH:mm'}},ticks:{color:'#4a5070',font:{size:10},maxTicksLimit:8},grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.06)'}},
+      y:{ticks:{color:'#4a5070',font:{size:10},callback:v=>v.toLocaleString()},grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.06)'},afterFit(scale){const m=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);scale.width=m?46:58;}}
+    }
+  };
+}
+
+function mkOptsCombined(){
+  const base=mkOpts();
+  base.scales.y2=DUMMY_RIGHT_AXIS;
+  const isMobC=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);
+  if(isMobC) base.plugins.legend={display:false};
+  base.plugins.tooltip.filter=function(item){return !item.dataset.label.includes('Combined');};
+  base.plugins.tooltip.callbacks={afterBody:function(items){
+    if(items.length<2) return [];
+    const total=items.reduce((s,t)=>s+(t.parsed.y||0),0);
+    return ['━━━━━━━━━━━━━━━','Combined: '+Math.round(total).toLocaleString()+' W'];
+  }};
+  return base;
+}
+
+function makeChart(id,cfg){
+  if(charts[id]){charts[id].destroy();delete charts[id];}
+  const ctx=document.getElementById(id);
+  if(!ctx) return null;
+  const c=new Chart(ctx,cfg);
+  charts[id]=c;
+  return c;
+}
+
+// ── CROSSHAIR ─────────────────────────────────────────────────────────────────
+// Identical to dashboard.html — synced vertical line across all charts.
+const crosshairPlugin={
+  id:'crosshair',
+  afterDraw(chart){
+    if(chart._crosshairX==null) return;
+    const {ctx,chartArea:{top,bottom}}=chart;
+    ctx.save();ctx.beginPath();
+    ctx.moveTo(chart._crosshairX,top);ctx.lineTo(chart._crosshairX,bottom);
+    ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.stroke();ctx.restore();
+  }
+};
+Chart.register(crosshairPlugin);
+
+function syncCrosshair(e,sourceChart){
+  const x=e.native?e.native.offsetX:e.offsetX;
+  Object.values(charts).forEach(c=>{
+    if(c===sourceChart||!c.scales?.x) return;
+    const src=sourceChart.chartArea,dst=c.chartArea;
+    const ratio=(x-src.left)/(src.right-src.left);
+    const dstX=dst.left+ratio*(dst.right-dst.left);
+    c._crosshairX=(dstX>=dst.left&&dstX<=dst.right)?dstX:null;
+    c.draw();
+  });
+}
+function clearCrosshair(){Object.values(charts).forEach(c=>{c._crosshairX=null;c.draw&&c.draw();});}
+document.addEventListener('mousemove',e=>{
+  const canvas=e.target.closest('canvas');if(!canvas) return;
+  const chart=charts[canvas.id];if(!chart||!chart.scales?.x) return;
+  const rect=canvas.getBoundingClientRect();
+  const x=e.clientX-rect.left;
+  chart._crosshairX=x;chart.draw();
+  syncCrosshair({native:{offsetX:x}},chart);
+});
+document.addEventListener('mouseleave',clearCrosshair,true);
+
+// ── LOAD CHARTS ───────────────────────────────────────────────────────────────
+/**
+ * loadCharts() — fetch and build all advanced charts for grid-tie.
+ * Omits battery and load charts (not relevant for grid-tie inverters).
+ */
+async function loadCharts(){
+  if(!currentSite) return;
+  const site=encodeURIComponent(currentSite);
+  const get=url=>fetch(url).then(r=>r.json()).catch(e=>{console.error(url,e);return null;});
+  const [pvR,gridR,dailyR,tempR,peakR]=await Promise.all([
+    get(`/api/solar/chart/pv?site=${site}`),
+    get(`/api/solar/chart/grid?site=${site}`),
+    get(`/api/solar/chart/daily?site=${site}`),
+    get(`/api/solar/chart/temps?site=${site}`),
+    get(`/api/solar/chart/peaks?site=${site}`),
+  ]);
+
+  // Compute shared x-axis bounds
+  const allTs=[pvR?.per_inv, gridR?.power, gridR?.voltage, tempR];
+  let min=Infinity,max=-Infinity;
+  allTs.forEach(ds=>(ds||[]).forEach(r=>{
+    const t=new Date(r.time||r.minute).getTime();
+    if(t<min) min=t; if(t>max) max=t;
+  }));
+  window._chartBounds=min!==Infinity?{min:new Date(min),max:new Date(max)}:null;
+
+  if(pvR)    buildPVChart(pvR);
+  if(gridR)  buildGridChart(gridR);
+  if(dailyR) buildDailyChart(dailyR);
+  if(tempR)  buildTempChart(tempR);
+  if(peakR)  buildPeaks(peakR);
+}
+
+function buildPVChart(data){
+  const inv=groupBy(data.per_inv,'inverter_name');
+  const colors=['#f5a623','#2ecc71','#4fc3f7','#9b59b6'];
+  const datasets=Object.entries(inv).map(([name,rows],i)=>({
+    label:`PV (W) ${name}`,
+    data:rows.map(r=>({x:new Date(r.time),y:parseFloat(r.pv_w)||0})),
+    borderColor:colors[i],backgroundColor:'transparent',fill:false,tension:.2,borderWidth:1.5,pointRadius:0,
+  }));
+  if(data.combined?.length){
+    datasets.push({
+      label:'Combined Total (W)',
+      data:data.combined.map(r=>({x:new Date(r.time),y:parseFloat(r.combined_w)||0})),
+      borderColor:'rgba(255,255,255,0.65)',backgroundColor:'transparent',
+      fill:false,tension:.2,borderWidth:2,pointRadius:0,
+      tooltip:{enabled:false},
+    });
+  }
+  const opts=mkOptsCombined();
+  if(window._chartBounds){opts.scales.x.min=window._chartBounds.min;opts.scales.x.max=window._chartBounds.max;}
+  makeChart('ch-pv',{type:'line',data:{datasets},options:opts});
+}
+
+function buildGridChart(data){
+  const opts=mkOpts();
+  if(window._chartBounds){opts.scales.x.min=window._chartBounds.min;opts.scales.x.max=window._chartBounds.max;}
+  const voltages=(data.voltage||[]).map(r=>parseFloat(r.grid_v)||0).filter(v=>v>100);
+  const vMin=voltages.length?Math.floor(Math.min(...voltages)/5)*5-10:215;
+  const vMax=voltages.length?Math.ceil(Math.max(...voltages)/5)*5+5:260;
+  opts.scales.y1={position:'right',min:vMin,max:vMax,
+    ticks:{color:'#4fc3f7',font:{size:10},maxTicksLimit:6,callback:v=>v+'V'},
+    grid:{display:false},border:{color:'rgba(255,255,255,.06)'},
+    afterFit(scale){const m=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);scale.width=m?36:46;}
+  };
+  // Grid power: negative = export (SolarWatch convention).
+  // We negate so export shows as a positive value on the chart (upward = exporting).
+  const datasets=[
+    {label:'Grid Export (W)',
+     data:(data.power||[]).map(r=>({x:new Date(r.time),y:-(parseFloat(r.grid_w)||0)})),
+     borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,.08)',
+     fill:true,tension:.2,borderWidth:1.5,pointRadius:0,yAxisID:'y'},
+    {label:'Grid Voltage (V)',
+     data:(data.voltage||[]).map(r=>({x:new Date(r.time),y:parseFloat(r.grid_v)||0})),
+     borderColor:'#4fc3f7',backgroundColor:'transparent',fill:false,tension:.2,borderWidth:1.5,pointRadius:0,yAxisID:'y1'},
+  ];
+  opts.scales.y.ticks.callback=v=>v>=0?fmt(v):'-'+fmt(-v);
+  makeChart('ch-grid',{type:'line',data:{datasets},options:opts});
+}
+
+function buildDailyChart(data){
+  // Grid-tie daily chart.
+  // The shared /api/solar/chart/daily query returns: pv, load, grid (import), chg, dis.
+  // For grid-tie: load/chg/dis are NULL, grid import is 0.
+  // daily_pv_energy = daily_grid_export (sungrow_worker sets them equal).
+  // We show one bar: "PV Generated" which equals grid export for a pure grid-tie site.
+  const isMobD=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);
+  const displayData=isMobD?data.slice(-7):data;
+  const labels=displayData.map(r=>r.day);
+  const today=new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Johannesburg'});
+  const mkColor=(hex,idx)=>hex+(labels[idx]===today?'99':'ff');
+  const datasets=[
+    {label:'PV Generated / Exported (kWh)',data:displayData.map(r=>parseFloat(r.pv)||0),backgroundColor:labels.map((_,i)=>mkColor('#FADE2A',i)),barPercentage:.75},
+  ];
+  const opts=mkOpts();
+  const isMobChart=window.innerWidth<=768||(window.innerWidth<=1024&&window.innerHeight>window.innerWidth);
+  const shortLabels=isMobChart?labels.map(d=>{
+    const dt=new Date(d+'T12:00:00');
+    return dt.toLocaleDateString('en-ZA',{month:'short',day:'numeric',timeZone:'Africa/Johannesburg'});
+  }):labels;
+  opts.scales.x={type:'category',labels:shortLabels,
+    ticks:{color:'#4a5070',font:{size:isMobChart?9:10},maxRotation:isMobChart?45:0},
+    grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.06)'}};
+  opts.scales.y.ticks.callback=v=>v+' kWh';
+  const todayIdx=labels.indexOf(today);
+  if(todayIdx>=0){
+    if(!opts.plugins) opts.plugins={};
+    opts.plugins.annotation={annotations:{todayLbl:{
+      type:'label',xValue:todayIdx,content:['in progress'],
+      color:'rgba(255,255,255,.4)',font:{size:9,style:'italic'},yAdjust:-14
+    }}};
+  }
+  makeChart('ch-daily',{type:'bar',data:{labels,datasets},options:opts});
+}
+
+function buildTempChart(data){
+  const inv=groupBy(data,'inverter_name');
+  const colors=['#e74c3c','#f5a623','#4fc3f7'];
+  const datasets=[];let ci=0;
+  Object.entries(inv).forEach(([name,rows])=>{
+    const c=colors[ci++%colors.length];
+    datasets.push({label:`Inv Temp ${name}`,data:rows.filter(r=>r.inv_temp).map(r=>({x:new Date(r.time),y:parseFloat(r.inv_temp)||0})),borderColor:c,backgroundColor:'transparent',fill:false,tension:.2,borderWidth:1.5,pointRadius:0});
+    datasets.push({label:`DC Temp ${name}`,data:rows.filter(r=>r.dc_temp).map(r=>({x:new Date(r.time),y:parseFloat(r.dc_temp)||0})),borderColor:c,backgroundColor:'transparent',fill:false,tension:.2,borderWidth:1,borderDash:[4,4],pointRadius:0});
+  });
+  const opts=mkOpts();
+  opts.scales.y.ticks.callback=v=>v+'°C';
+  opts.scales.y2=DUMMY_RIGHT_AXIS;
+  if(window._chartBounds){opts.scales.x.min=window._chartBounds.min;opts.scales.x.max=window._chartBounds.max;}
+  makeChart('ch-temp',{type:'line',data:{datasets},options:opts});
+}
+
+function buildPeaks(data){
+  const fmtW=w=>{const n=parseFloat(w)||0;return n>=1000?(n/1000).toFixed(1)+' kW':Math.round(n)+' W';};
+  const pv=fmtW(data.peak_pv), grid=fmtW(data.peak_grid);
+  document.getElementById('a-peak-pv').textContent=pv;
+  document.getElementById('fa-peak-pv').textContent=pv;
+  if(data.peak_grid!=null){
+    document.getElementById('a-peak-grid').textContent=grid;
+    document.getElementById('fa-peak-grid').textContent=grid;
+  }
+}
+
+function groupBy(arr,key){
+  const m={};(arr||[]).forEach(r=>{const k=r[key];if(!m[k])m[k]=[];m[k].push(r);});return m;
+}
+
+// ── MONTHLY STATS ─────────────────────────────────────────────────────────────
+let monthlyTimer=null;
+async function refreshMonthly(){
+  if(!currentSite) return;
+  try{
+    const r=await fetch(`/api/solar/monthly?site=${encodeURIComponent(currentSite)}`);
+    const d=await r.json();
+    if(!d.error) renderMonthly(d);
+  }catch(e){console.error('monthly fetch:',e);}
+  monthlyTimer=setTimeout(refreshMonthly,15*60*1000);
+}
+function renderMonthly(d){
+  const pv=parseFloat(d.month_pv_kwh)||0;
+  document.getElementById('f-mpv').textContent=pv.toFixed(1)+' kWh';
+  document.getElementById('fa-mpv').textContent=pv.toFixed(1)+' kWh';
+}
+
+// ── TEMP CHART TOGGLE ─────────────────────────────────────────────────────────
+let tempsVisible=true;
+function toggleTemps(){
+  tempsVisible=!tempsVisible;
+  const wrap=document.getElementById('temp-chart-wrap');
+  const icon=document.getElementById('temp-toggle-icon');
+  wrap.style.display=tempsVisible?'':'none';
+  icon.textContent=tempsVisible?'▼ HIDE':'▶ SHOW';
+  if(tempsVisible&&charts['ch-temp']) charts['ch-temp'].resize();
+}
+
+// ── WEATHER ───────────────────────────────────────────────────────────────────
+// Identical to dashboard.html — same weather strip logic.
+let wxTimer=null;
+function fmtTime(iso){
+  if(!iso) return '—';
+  return new Date(iso).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Africa/Johannesburg'});
+}
+async function refreshWeather(){
+  if(!currentSite) return;
+  try{
+    const r=await fetch(`/api/solar/weather?site=${encodeURIComponent(currentSite)}`);
+    const d=await r.json();
+    if(d.error||!d.temp_c) return;
+    renderWeather(d);
+  }catch(e){console.error('weather fetch:',e);}
+  wxTimer=setTimeout(refreshWeather,10*60*1000);
+}
+function renderWeather(d){
+  window._wx=d;
+  const strip=document.getElementById('wx-strip');
+  strip.classList.remove('wx-empty');
+  const f=v=>v!=null?parseFloat(v):null;
+  const temp=f(d.temp_c),feels=f(d.feels_like_c),rain=f(d.precipitation),wind=f(d.wind_speed),uv=f(d.uv_index),rad=f(d.solar_rad);
+  const cloud=f(d.cloud_cover)??0,hum=d.humidity!=null?parseInt(d.humidity):null;
+  document.getElementById('wx-icon').textContent=d.emoji||'🌡️';
+  document.getElementById('wx-desc').textContent=d.description||'—';
+  document.getElementById('wx-site').textContent=currentSite;
+  document.getElementById('wx-temp').textContent=temp!=null?temp.toFixed(1)+'°C':'—';
+  document.getElementById('wx-feels').textContent=feels!=null?feels.toFixed(1)+'°C':'—';
+  document.getElementById('wx-rain').textContent=rain!=null?(rain===0?'0':rain.toFixed(1))+' mm/hr':'—';
+  document.getElementById('wx-wind').textContent=wind!=null?wind.toFixed(0)+' km/h':'—';
+  document.getElementById('wx-hum').textContent=hum!=null?hum+'%':'—';
+  document.getElementById('wx-uv').textContent=uv!=null?uv.toFixed(1):'—';
+  const radPill=document.getElementById('wx-rad-pill');
+  if(radPill){
+    if(!d.is_day&&d.sunrise){
+      const diffMs=new Date(d.sunrise).getTime()-Date.now();
+      if(diffMs>0){
+        const hrs=Math.floor(diffMs/3600000),mins=Math.floor((diffMs%3600000)/60000);
+        document.getElementById('wx-rad-lbl').textContent='SUNRISE IN';
+        document.getElementById('wx-rad').textContent=hrs+'h '+mins+'m';
+      } else {document.getElementById('wx-rad-lbl').textContent='SOLAR RAD';document.getElementById('wx-rad').textContent=rad!=null?Math.round(rad)+' W/m²':'—';}
+    } else {document.getElementById('wx-rad-lbl').textContent='SOLAR RAD';document.getElementById('wx-rad').textContent=rad!=null?Math.round(rad)+' W/m²':'—';}
+  }
+  document.getElementById('wx-cloud-pct').textContent=cloud+'%';
+  document.getElementById('wx-cloud-bar').style.width=cloud+'%';
+  document.getElementById('wx-cloud-bar').style.background=cloud<30?'var(--solar)':cloud<70?'var(--amber)':'var(--muted)';
+  document.getElementById('wx-sun').textContent='🌅 '+fmtTime(d.sunrise)+'  ·  🌇 '+fmtTime(d.sunset);
+}
+
+// ── LIVE DATA LOOP ────────────────────────────────────────────────────────────
+async function refresh(){
+  if(!currentSite) return;
+  try{
+    const r=await fetch(`/api/solar/flow?site=${encodeURIComponent(currentSite)}`);
+    const d=await r.json();
+    if(!d.error) render(d);
+  }catch(e){console.error(e);}
+  liveTimer=setTimeout(refresh,10000);
+}
+
+function updateURL(siteName){
+  const url=new URL(window.location.href);
+  url.searchParams.set('site',siteName);
+  window.history.replaceState({},'',url.toString());
+}
+
+async function loadSites(){
+  const r=await fetch('/api/solar/sites');
+  const sites=await r.json();
+  const sel=document.getElementById('site-sel');
+  sel.innerHTML=sites.map(s=>`<option value="${s.name}">${s.display}</option>`).join('');
+  if(!sites.length) return;
+
+  // Cache topology for each site — used in onSiteChange() to detect template switches
+  sites.forEach(s=>{ _siteTopologies[s.name] = s.topology || 'hybrid'; });
+
+  const urlParam=new URLSearchParams(window.location.search).get('site');
+  const stored=localStorage.getItem('sw_site');
+  const preferred=urlParam||stored||null;
+  const match=preferred?sites.find(s=>s.name.toLowerCase()===preferred.toLowerCase()):null;
+  currentSite=(match?match.name:sites[0].name);
+  sel.value=currentSite;
+  localStorage.setItem('sw_site',currentSite);
+  if(urlParam) updateURL(currentSite);
+  refresh();refreshWeather();refreshMonthly();
+}
+
+function onSiteChange(){
+  const newSite = document.getElementById('site-sel').value;
+  localStorage.setItem('sw_site', newSite);
+
+  // If the new site uses a different template family (hybrid vs grid-tie),
+  // we must do a full page reload — JS data refresh alone is not sufficient.
+  const newTopology = _siteTopologies[newSite] || 'hybrid';
+  const needsReload = !GRIDTIE_TOPOLOGIES.has(newTopology);
+  if(needsReload){
+    const url = new URL(window.location.href);
+    url.searchParams.set('site', newSite);
+    window.location.href = url.toString();
+    return;
+  }
+
+  currentSite = newSite;
+  updateURL(currentSite);
+  if(liveTimer) clearTimeout(liveTimer);
+  if(wxTimer)   clearTimeout(wxTimer);
+  document.getElementById('wx-strip').classList.add('wx-empty');
+  document.getElementById('wx-desc').textContent='Loading weather…';
+  Object.values(charts).forEach(c=>c.destroy());charts={};
+  refresh();refreshWeather();refreshMonthly();
+  if(currentView==='adv') loadCharts();
+}
+
+setInterval(()=>{if(currentView==='adv')loadCharts();},60000);
+new ResizeObserver(()=>{if(window._ld)drawLines(window._ld);}).observe(document.getElementById('fa'));
+
+// ── CLOCK ─────────────────────────────────────────────────────────────────────
+function toggleClock(){clockVisible=!clockVisible;localStorage.setItem('sw_clock',clockVisible?'1':'0');applyClockState();}
+function applyClockState(){
+  const el=document.getElementById('clock-wrap');
+  const clk=document.getElementById('clock');
+  if(clockVisible){el.style.opacity='1';clk.style.color='var(--text)';if(!clockTimer)clockTimer=setInterval(updateClock,1000);updateClock();}
+  else{el.style.opacity='0.4';clk.style.color='var(--muted)';clk.textContent='--:--:--';if(clockTimer){clearInterval(clockTimer);clockTimer=null;}}
+}
+function updateClock(){
+  document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Africa/Johannesburg'});
+}
+clockVisible=localStorage.getItem('sw_clock')=='1';
+applyClockState();
+loadSites();
+</script>
+<script>
+// ── PWA: Service Worker + offline banner ──────────────────────────────────────
+(function(){
+  const banner=document.getElementById('offline-banner');
+  function showOffline(){if(banner)banner.classList.add('visible');}
+  function showOnline(){if(banner)banner.classList.remove('visible');}
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.addEventListener('message',e=>{
+      if(e.data&&e.data.type==='SW_OFFLINE') showOffline();
+      if(e.data&&e.data.type==='SW_ONLINE')  showOnline();
+    });
+    window.addEventListener('load',()=>{
+      navigator.serviceWorker.register('/sw.js',{scope:'/'})
+        .then(reg=>console.log('[SW] Registered, scope:',reg.scope))
+        .catch(err=>console.warn('[SW] Registration failed:',err));
+    });
+  }
+  window.addEventListener('offline',showOffline);
+  window.addEventListener('online', showOnline);
+})();
+</script>
+</body>
+</html>
