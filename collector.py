@@ -10,8 +10,8 @@ every CONFIG_RELOAD seconds — no restart needed.
 Supported inverter types:
   deye      → direct Modbus over WAN via Solarman V5 (pysolarmanv5)
   sunsynk   → cloud API at api.sunsynk.net
-  victron   → [placeholder] VRM API or direct Modbus — config pending
-  sungrow   → [placeholder] direct Modbus or SolarmanV5 — config pending
+  victron   → MQTT via Cerbo GX / CCGX local network
+  sungrow   → iSolarCloud cloud API at gateway.isolarcloud.com.hk
 
 Environment variables (same as the web app — one .env works for both):
   DATABASE_URL     postgresql+psycopg2://user:pass@host:5432/solarwatch
@@ -21,6 +21,11 @@ Environment variables (same as the web app — one .env works for both):
   RETRY_DELAY      seconds between retries (default: 5)
   CONFIG_RELOAD    seconds between site config reloads from DB (default: 300)
   WEATHER_INTERVAL seconds between weather polls (default: 900)
+
+  Sungrow-specific (set in .env alongside other vars):
+  SUNGROW_APPKEY   developer portal Appkey
+  SUNGROW_SECRET   developer portal Secret key
+  SUNGROW_REGION   hk (default) or eu
 
 Development:
   cp .env.example .env   # same .env as the web app
@@ -80,6 +85,10 @@ MAX_RETRIES      = int(os.getenv("MAX_RETRIES",      "3"))
 RETRY_DELAY      = int(os.getenv("RETRY_DELAY",      "5"))
 CONFIG_RELOAD    = int(os.getenv("CONFIG_RELOAD",    "300"))
 WEATHER_INTERVAL = int(os.getenv("WEATHER_INTERVAL", "900"))
+
+# Sungrow polls iSolarCloud which refreshes data every ~5 minutes.
+# Using a dedicated interval avoids hammering the API on every 60s cycle.
+SUNGROW_POLL_INTERVAL = int(os.getenv("SUNGROW_POLL_INTERVAL", "300"))
 
 
 def _build_database_url() -> str:
@@ -176,7 +185,7 @@ def db_session():
         yield conn
 
 
-# ── SITE CONFIG LOADING ────────────────────────────────────────────────────────
+# ── SITE CONFIG LOADING ───────────────────────────────────────────────────────
 
 def load_sites() -> dict[str, list[dict]]:
     """Load enabled sites from the DB, grouped by source_type.
@@ -185,16 +194,20 @@ def load_sites() -> dict[str, list[dict]]:
       {
         "deye":    [{"site_name": "Selati", "inverters": [...], ...}],
         "sunsynk": [{"site_name": "Penguin", "sunsynk_username": ..., ...}],
-        "victron": [{"site_name": "FarmXX", ...}],   # when added
-        "sungrow": [],
+        "victron": [{"site_name": "FarmXX", ...}],
+        "sungrow": [{"site_name": "Bitrad", "sungrow_username": ...,
+                     "sungrow_plant_id": ..., ...}],
       }
     """
     with db_session() as conn:
         rows = conn.execute(
             text(
                 """
-                SELECT site_name, display_name, source_type,
-                       inverters, sunsynk_username, sunsynk_password, sunsynk_plant_id,
+                SELECT site_name, display_name, source_type, inverter_topology,
+                       inverters,
+                       sunsynk_username, sunsynk_password, sunsynk_plant_id,
+                       sungrow_username, sungrow_password,
+                       sungrow_plant_id, sungrow_device_sn,
                        latitude, longitude
                 FROM   sites
                 WHERE  enabled = TRUE
@@ -291,8 +304,6 @@ def write_reading(site_name: str, inv_name: str, inv_sn: str, data: dict):
         except Exception as exc:
             exc_str = str(exc)
             if "ReadOnlySqlTransaction" in exc_str or "read-only transaction" in exc_str.lower():
-                # HA failover: this node is now a standby — invalidate the pool
-                # so the next attempt connects to the new primary via DNS
                 _invalidate_engine()
                 if attempt == 0:
                     log.warning(f"[{site_name}/{inv_name}] DB read-only (HA failover) — retrying after pool reset")
@@ -367,7 +378,13 @@ _sunsynk_clients: dict[str, sunsynk_worker.SunsynkClient] = {}
 
 
 def _sync_sunsynk_clients(sunsynk_sites: list[dict]):
-    """Keep client cache in sync with enabled Sunsynk sites."""
+    """Keep the Sunsynk client cache in sync with enabled sites.
+
+    Creates a new SunsynkClient for any site that doesn't have one,
+    and removes clients for sites that have been disabled or deleted.
+    Keyed by username so one client is shared across multiple sites on
+    the same account (rare but supported).
+    """
     active = {s["sunsynk_username"] for s in sunsynk_sites}
     for u in list(_sunsynk_clients):
         if u not in active:
@@ -402,20 +419,9 @@ def poll_sunsynk_sites(sites: list[dict]):
 
 
 # ── VICTRON POLLING ───────────────────────────────────────────────────────────
-# Placeholder — implementation pending inverter connection details.
-#
-# Planned approach (priority order):
-#   1. Direct Modbus/TCP to the Victron Cerbo GX / CCGX local IP
-#      Register map: https://github.com/victronenergy/venus-html5-app
-#   2. VRM API (cloud) as fallback
-#
-# Config fields needed in sites.inverters JSONB:
-#   { "name": "Victron_1", "ip": "192.168.x.x" }
-# Or for VRM cloud fallback:
-#   { "name": "Victron_1", "vrm_site_id": "xxx", "vrm_token": "xxx" }
-#
-# The poll result must return a dict matching the solar_readings schema
-# (same keys as deye_worker.poll() returns).
+# Victron sites connect via MQTT to the Cerbo GX / CCGX local IP.
+# One Cerbo GX aggregates all MPPTs and battery monitors into a single
+# logical inverter row per poll cycle.
 
 def poll_victron_sites(sites: list[dict]):
     """Poll Victron sites via MQTT (Cerbo GX / CCGX direct connection).
@@ -425,9 +431,6 @@ def poll_victron_sites(sites: list[dict]):
 
     The inverter config in sites.inverters should have exactly one entry:
       [{"name": "Victron_1", "mqtt_host": "10.0.1.80", "mqtt_port": 1883}]
-
-    The Cerbo GX IP is read from the inverters JSONB config stored in the DB
-    and set via the web UI (Sites → Edit → Add device).
     """
     for site in sites:
         if not running:
@@ -442,15 +445,12 @@ def poll_victron_sites(sites: list[dict]):
             )
             continue
 
-        inv = inverters[0]
-
+        inv      = inverters[0]
         inv_name = inv.get("name", "Victron")
 
         for attempt in range(1, MAX_RETRIES + 1):
             data = victron_worker.poll(inv, site_name)
             if data is not None:
-                # Use inv_name as both inverter_name and inverter_sn
-                # (Victron sites have one logical inverter per Cerbo GX)
                 write_reading(site_name, inv_name, inv_name, data)
                 break
             if attempt < MAX_RETRIES:
@@ -464,25 +464,88 @@ def poll_victron_sites(sites: list[dict]):
 
 
 # ── SUNGROW POLLING ───────────────────────────────────────────────────────────
-# Placeholder — implementation pending inverter connection details.
-#
-# Planned approach (priority order):
-#   1. Direct Modbus/TCP to the Sungrow inverter local IP
-#      Sungrow uses SolarmanV5 protocol (same as Deye) with different register maps.
-#      Register reference: SG-MODBUS-TCP protocol document
-#   2. iSolarCloud API (cloud) as fallback
-#
-# Config fields needed in sites.inverters JSONB:
-#   { "name": "Sungrow_1", "ip": "192.168.x.x",
-#     "dongle_serial": 12345678, "inverter_sn": "B2200...", "model": "SH10RT" }
+# Sungrow sites use the iSolarCloud cloud API (no local Modbus for this install).
+# Authentication: appkey + secret (from .env) + plant owner credentials (from DB).
+# One SungrowClient per username, cached for the lifetime of the process.
+# Poll interval is SUNGROW_POLL_INTERVAL (default 300s) because iSolarCloud
+# only refreshes device data every ~5 minutes — polling faster wastes API calls.
+
+import sungrow_worker
+
+_sungrow_clients: dict[str, sungrow_worker.SungrowClient] = {}
+_last_sungrow_poll: float = 0.0  # monotonic timestamp of the last Sungrow poll cycle
+
+
+def _sync_sungrow_clients(sungrow_sites: list[dict]):
+    """Keep the Sungrow client cache in sync with enabled sites.
+
+    Creates a new SungrowClient for any site that doesn't have one,
+    and removes clients for sites that have been disabled or deleted.
+    Keyed by sungrow_username — one client per account.
+    """
+    active = {s["sungrow_username"] for s in sungrow_sites if s.get("sungrow_username")}
+    for u in list(_sungrow_clients):
+        if u not in active:
+            log.info(f"Removing Sungrow client for {u} (site disabled or removed)")
+            del _sungrow_clients[u]
+    for site in sungrow_sites:
+        u = site.get("sungrow_username")
+        if not u:
+            log.warning(f"[{site['site_name']}] Sungrow site has no username configured — skipping")
+            continue
+        if u not in _sungrow_clients:
+            _sungrow_clients[u] = sungrow_worker.SungrowClient(
+                username=u,
+                password=site["sungrow_password"],
+            )
+
 
 def poll_sungrow_sites(sites: list[dict]):
-    """Poll Sungrow inverter sites — placeholder, implementation pending."""
+    """Poll all Sungrow iSolarCloud sites.
+
+    Uses cached SungrowClient instances keyed by username, matching the
+    same pattern as poll_sunsynk_sites(). The client handles token refresh
+    automatically — no manual re-authentication needed.
+
+    Only polls if SUNGROW_POLL_INTERVAL seconds have elapsed since the last
+    Sungrow cycle, because iSolarCloud data only refreshes every ~5 minutes.
+    """
+    global _last_sungrow_poll
+
+    now = time.monotonic()
+    if now - _last_sungrow_poll < SUNGROW_POLL_INTERVAL:
+        return  # Too soon — iSolarCloud hasn't refreshed data yet
+
+    _last_sungrow_poll = now
+
     for site in sites:
-        log.warning(
-            f"[{site['site_name']}] Sungrow polling not yet implemented. "
-            f"Add sungrow_worker.py and wire it here when inverter details are available."
-        )
+        if not running:
+            return
+        site_name = site["site_name"]
+        username  = site.get("sungrow_username")
+
+        if not username:
+            log.warning(f"[{site_name}] No sungrow_username configured — skipping")
+            continue
+
+        client = _sungrow_clients.get(username)
+        if not client:
+            log.warning(f"[{site_name}] No Sungrow client found for {username} — skipping")
+            continue
+
+        try:
+            readings = sungrow_worker.poll(site, client)
+            for reading in readings:
+                if not running:
+                    return
+                write_reading(
+                    site_name,
+                    reading.pop("inverter_name"),
+                    reading.pop("inverter_sn"),
+                    reading,
+                )
+        except Exception as exc:
+            log.error(f"[{site_name}] Sungrow poll error: {exc}", exc_info=True)
 
 
 # ── WEATHER POLLING ───────────────────────────────────────────────────────────
@@ -546,10 +609,11 @@ def main():
     log.info("=" * 60)
     log.info("SolarWatch Collector starting")
     host_part = _build_database_url().split("@")[-1]
-    log.info(f"DB              : {host_part}")
-    log.info(f"Poll interval   : {POLL_INTERVAL}s")
-    log.info(f"Config reload   : every {CONFIG_RELOAD}s")
-    log.info(f"Weather interval: every {WEATHER_INTERVAL}s")
+    log.info(f"DB               : {host_part}")
+    log.info(f"Poll interval    : {POLL_INTERVAL}s")
+    log.info(f"Sungrow interval : {SUNGROW_POLL_INTERVAL}s")
+    log.info(f"Config reload    : every {CONFIG_RELOAD}s")
+    log.info(f"Weather interval : every {WEATHER_INTERVAL}s")
     log.info("=" * 60)
 
     try:
@@ -568,7 +632,7 @@ def main():
     while running:
         cycle_start = time.monotonic()
 
-        # Reload site config periodically
+        # Reload site config periodically — picks up web UI changes without restart
         if time.monotonic() - last_cfg_load > CONFIG_RELOAD:
             try:
                 sites_by_type = load_sites()
@@ -577,7 +641,9 @@ def main():
                 for src, sites in sites_by_type.items():
                     if sites:
                         log.info(f"  {src}: {[s['site_name'] for s in sites]}")
+                # Sync client caches after config reload
                 _sync_sunsynk_clients(sites_by_type["sunsynk"])
+                _sync_sungrow_clients(sites_by_type["sungrow"])
             except Exception as exc:
                 log.error(f"Failed to load sites: {exc}")
 

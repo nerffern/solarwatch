@@ -51,6 +51,7 @@ from app.routers.solar import (
     _get_flow,
     _get_monthly,
     _get_weather,
+    _TOPOLOGY_TEMPLATE,
 )
 
 log = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ def _lookup_token(token: str) -> Optional[dict]:
         row = conn.execute(
             text(
                 """
-                SELECT id, site_name, display_name, enabled
+                SELECT id, site_name, display_name, enabled, inverter_topology
                 FROM sites
                 WHERE share_token = :token
                 """
@@ -101,25 +102,42 @@ def _require_token(token: str) -> dict:
 # Public dashboard
 # ---------------------------------------------------------------------------
 
+# Maps inverter topology values to the correct share dashboard template.
+# Mirrors _TOPOLOGY_TEMPLATE in solar.py but uses the *_share variants.
+_SHARE_TOPOLOGY_TEMPLATE: dict[str, str] = {
+    "hybrid":               "dashboard_share.html",
+    "hybrid_three_phase":   "dashboard_share.html",
+    "grid_tie":             "dashboard_share_gridtie.html",
+    "grid_tie_three_phase": "dashboard_share_gridtie.html",
+    "off_grid":             "dashboard_share.html",
+    "off_grid_three_phase": "dashboard_share.html",
+}
+
+
 @router.get("/share/{token}", response_class=HTMLResponse)
 @limiter.limit(SHARE_RATE_LIMIT)
 async def share_dashboard(token: str, request: Request):
-    """Serve the dashboard pre-locked to the token's site.
+    """Serve the read-only dashboard pre-locked to the token's site.
 
-    The dashboard HTML is identical to the authenticated version.
+    Selects the correct share template based on the site's inverter_topology
+    so grid-tie sites get the grid-tie dashboard (no battery widget) and
+    hybrid sites get the standard dashboard. Falls back to the standard share
+    template for any unrecognised topology.
+
     A JS variable SHARE_TOKEN is injected so the frontend knows to use
     the /api/share/* endpoints instead of /api/solar/*.
     """
     site = _require_token(token)
 
-    # Inject the token and site name so the dashboard JS can use them.
-    # We render the full dashboard template and patch the JS init block.
+    topology = site.get("inverter_topology") or "hybrid"
+    template = _SHARE_TOPOLOGY_TEMPLATE.get(topology, "dashboard_share.html")
+
     return templates.TemplateResponse(
-        "dashboard_share.html",
+        template,
         {
-            "request": request,
-            "share_token": token,
-            "site_name": site["site_name"],
+            "request":      request,
+            "share_token":  token,
+            "site_name":    site["site_name"],
             "site_display": site["display_name"],
         },
     )

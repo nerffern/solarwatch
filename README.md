@@ -39,11 +39,12 @@ Detailed step-by-step guides are in the [`docs/`](docs/) folder:
 ## Architecture
 
 ```
-Inverters (Deye / Sunsynk)
+Inverters (Deye / Sunsynk / Victron / Sungrow)
         │
         ▼
   collector.py  ──── systemd service, runs continuously
-        │             polls every 60s, writes to PostgreSQL
+        │             Deye/Victron: polls every 60s (direct)
+        │             Sunsynk/Sungrow: polls every 300s (cloud API)
         ▼
   PostgreSQL (HA cluster with HAProxy VIP)
         │
@@ -52,7 +53,7 @@ Inverters (Deye / Sunsynk)
   (gunicorn + uvicorn workers, multiple pods)
         │
         ▼
-  Browser / PWA
+  Browser / PWA (topology-aware: hybrid / grid-tie / off-grid templates)
 ```
 
 The collector and web app are **independent processes** sharing one database.
@@ -106,6 +107,7 @@ ALTER USER solarwatch_user WITH PASSWORD 'your-secure-password';
 | `migrate_share.sql` | **Upgrade only** — adds `share_token` to an existing DB created before v1.0 |
 | `migrate_indexes.sql` | **Upgrade only** — adds performance indexes to an existing DB created before v1.0 |
 | `migrate_weather.sql` | **Upgrade only** — adds weather table to an existing DB created before weather support |
+| `migrate_0004_topology_sungrow.sql` | **Upgrade only** — adds `inverter_topology` column and Sungrow credential columns |
 
 If you are doing a fresh install using the current `setup.sql`, none of the
 migration files are needed — everything is already included.
@@ -224,6 +226,11 @@ Config changes in the web UI are picked up every 5 minutes — no restart needed
 | `CONFIG_RELOAD` | — | `300` | Seconds between site config reloads from DB |
 | `WEATHER_INTERVAL` | — | `900` | Weather poll interval in seconds (15 min) |
 | `VICTRON_MQTT_PORT` | — | `1883` | Victron MQTT broker port — only set if your Cerbo GX uses a non-standard port. The IP address for each Victron site is configured in the web UI (Sites → Edit → Add device). |
+| `SUNGROW_APPKEY` | Sungrow sites | — | Developer portal Appkey — identifies the SolarWatch application to iSolarCloud. |
+| `SUNGROW_SECRET` | Sungrow sites | — | Developer portal Secret key — sent as `x-access-key` header on every API request. |
+| `SUNGROW_REGION` | No | `hk` | Gateway region: `hk` (Asia-Pacific/South Africa) or `eu` (Europe). |
+| `SUNGROW_POLL_INTERVAL` | No | `300` | Seconds between Sungrow iSolarCloud polls. iSolarCloud refreshes data every ~5 min — polling more often wastes API quota. |
+| `SUNGROW_DEBUG` | No | `0` | Set `1` to log raw iSolarCloud API responses — useful for troubleshooting. |
 
 > **Note:** The collector uses the same `DATABASE_URL` or `DB_*` variables as
 > the web app. There are no separate `PG_*` variables — one `.env` file covers both.
@@ -289,9 +296,24 @@ The Sites page is the main configuration hub.
 
 **Adding a site:**
 1. Click **Add site**
-2. Set site name (internal ID, cannot change), display name, source type
-3. For Deye: add inverters after creation
+2. Set site name (internal ID, cannot change), display name, source type, and **inverter topology**
+3. For Deye: add inverters after creation (IP, dongle serial, inverter SN)
 4. For Sunsynk: enter username, password, plant ID
+5. For Sungrow: enter iSolarCloud username, password, and plant ID (ps_id from `test_sungrow.py`)
+6. Set latitude/longitude so weather data is collected for the site
+
+**Inverter topology** determines which dashboard template is served:
+
+| Topology | Battery | Grid | Phases | Used for |
+|---|---|---|---|---|
+| Hybrid (single phase) | ✅ | ✅ | 1 | Deye, Sunsynk *(default)* |
+| Hybrid (three phase) | ✅ | ✅ | 3 | Large commercial hybrids |
+| Grid-tie (single phase) | ❌ | ✅ | 1 | Small residential grid-tie |
+| Grid-tie (three phase) | ❌ | ✅ | 3 | Sungrow SG125CX-P2 |
+| Off-grid (single phase) | ✅ | ❌ | 1 | Remote/farm systems |
+| Off-grid (three phase) | ✅ | ❌ | 3 | Large remote systems |
+
+Existing sites default to **Hybrid — single phase** automatically.
 
 **Editing a site (admin):** Click **Edit** to access:
 - Site details (name, location, coordinates, enabled toggle)
@@ -697,12 +719,14 @@ sudo systemctl status solarwatch-collector solarwatch-web
 Expected collector startup:
 ```
 SolarWatch Collector starting
-DB              : postgres-ha.../solarwatch
+DB               : postgres-ha.../solarwatch
+Sungrow interval : 300s
 DB connection verified
 Sites loaded:
   deye:    ['Selati', 'Lanner']
   sunsynk: ['Penguin']
   victron: ['Harmonia', 'Oppikop']
+  sungrow: ['BitradFactory']
 ```
 
 **Useful commands**
@@ -755,7 +779,7 @@ required.
 | `deye` | Solarman V5 Modbus over WAN | Direct IP to dongle, no cloud |
 | `sunsynk` | REST API at api.sunsynk.net | Cloud — needs username/password/plant ID |
 | `victron` | MQTT via Cerbo GX / CCGX | Direct local network — no VRM cloud needed |
-| `sungrow` | Placeholder | Worker pending — site disabled until added |
+| `sungrow` | iSolarCloud REST API | Cloud — needs developer APPKEY/SECRET in `.env` + plant owner credentials per site in web UI |
 
 **All inverter types store data in the same `solar_readings` table and are
 displayed identically on the dashboard.** The collector fills the fields that

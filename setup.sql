@@ -46,6 +46,25 @@ CREATE TABLE IF NOT EXISTS sites (
     sunsynk_username    TEXT,
     sunsynk_password    TEXT,
     sunsynk_plant_id    TEXT,
+    -- Inverter topology — determines which dashboard template to serve
+    -- and which collector fields are relevant (battery, grid, phases).
+    -- DEFAULT 'hybrid' keeps all existing sites working without any UPDATE.
+    inverter_topology   TEXT        NOT NULL DEFAULT 'hybrid'
+                        CHECK (inverter_topology IN (
+                            'hybrid',               -- battery + grid, single phase  (Deye, Sunsynk)
+                            'hybrid_three_phase',   -- battery + grid, three phase
+                            'grid_tie',             -- grid only, single phase
+                            'grid_tie_three_phase', -- grid only, three phase        (Sungrow SG125CX-P2)
+                            'off_grid',             -- battery only, single phase
+                            'off_grid_three_phase'  -- battery only, three phase
+                        )),
+    -- Sungrow iSolarCloud cloud credentials (source_type = 'sungrow' only)
+    -- sungrow_plant_id : ps_id from /openapi/getPowerStationList
+    -- sungrow_device_sn: ps_key composite string from /openapi/getDeviceList
+    sungrow_username    TEXT,
+    sungrow_password    TEXT,
+    sungrow_plant_id    TEXT,
+    sungrow_device_sn   TEXT,
     -- Public share link token. NULL = sharing disabled.
     -- Regenerating revokes the old link instantly.
     share_token         TEXT        UNIQUE DEFAULT NULL,

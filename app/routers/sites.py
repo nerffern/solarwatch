@@ -11,8 +11,8 @@ Routes:
     POST /sites/{site_id}/toggle    → enable / disable site
     POST /sites/{site_id}/delete    → delete site (admin password required)
 
-    -- Inverter management (Deye sites only) --
-    POST /sites/{site_id}/inverters/add     → add an inverter
+    -- Inverter management (Deye / Victron sites only) --
+    POST /sites/{site_id}/inverters/add          → add an inverter
     POST /sites/{site_id}/inverters/{idx}/delete → remove an inverter
 
     -- User-site assignment (from user admin page) --
@@ -39,6 +39,19 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/sites", tags=["sites"])
 templates = Jinja2Templates(directory="app/templates")
 
+# All valid source types — used for validation on site creation.
+VALID_SOURCE_TYPES = ("deye", "sunsynk", "victron", "sungrow")
+
+# All valid inverter topologies — must match the DB CHECK constraint exactly.
+VALID_TOPOLOGIES = (
+    "hybrid",
+    "hybrid_three_phase",
+    "grid_tie",
+    "grid_tie_three_phase",
+    "off_grid",
+    "off_grid_three_phase",
+)
+
 
 def _flash(request: Request, category: str, message: str) -> None:
     """Store a flash message (category + text) in the session for the next page load."""
@@ -63,9 +76,10 @@ def _fetch_all_sites() -> list[dict]:
         rows = conn.execute(
             text(
                 """
-                SELECT id, site_name, display_name, source_type, enabled,
-                       location, latitude, longitude,
+                SELECT id, site_name, display_name, source_type, inverter_topology,
+                       enabled, location, latitude, longitude,
                        inverters, sunsynk_username, sunsynk_plant_id,
+                       sungrow_plant_id,
                        created_at, updated_at
                 FROM sites
                 ORDER BY display_name
@@ -81,9 +95,12 @@ def _fetch_site(site_id: int) -> Optional[dict]:
         row = conn.execute(
             text(
                 """
-                SELECT id, site_name, display_name, source_type, enabled,
-                       location, latitude, longitude,
-                       inverters, sunsynk_username, sunsynk_password, sunsynk_plant_id,
+                SELECT id, site_name, display_name, source_type, inverter_topology,
+                       enabled, location, latitude, longitude,
+                       inverters,
+                       sunsynk_username, sunsynk_password, sunsynk_plant_id,
+                       sungrow_username, sungrow_password,
+                       sungrow_plant_id, sungrow_device_sn,
                        share_token, created_at, updated_at
                 FROM sites WHERE id = :id
                 """
@@ -156,36 +173,48 @@ async def sites_list(request: Request, user=Depends(require_role("admin"))):
 @router.get("/new", response_class=HTMLResponse)
 async def sites_new_form(request: Request, user=Depends(require_role("admin"))):
     """GET /sites/new — render the new site creation form."""
-    return _render(request, "sites/form.html", site=None, current_user=user,
-                   mode="create")
+    return _render(
+        request, "sites/form.html",
+        site=None, current_user=user, mode="create",
+        valid_topologies=VALID_TOPOLOGIES,
+    )
 
 
 @router.post("/new")
 async def sites_new_post(
     request: Request,
     user=Depends(require_role("admin")),
-    site_name: str = Form(""),
-    display_name: str = Form(""),
-    source_type: str = Form("deye"),
-    location: str = Form(""),
-    latitude: str = Form(""),
-    longitude: str = Form(""),
-    enabled: Optional[str] = Form(None),
+    site_name:         str           = Form(""),
+    display_name:      str           = Form(""),
+    source_type:       str           = Form("deye"),
+    inverter_topology: str           = Form("hybrid"),
+    location:          str           = Form(""),
+    latitude:          str           = Form(""),
+    longitude:         str           = Form(""),
+    enabled:           Optional[str] = Form(None),
 ):
     """POST /sites/new — validate inputs, create the site row, redirect to its edit page."""
-    site_name = site_name.strip()
+    site_name    = site_name.strip()
     display_name = display_name.strip()
 
     if not site_name or not display_name:
         _flash(request, "danger", "Site name and display name are required.")
         return RedirectResponse(url="/sites/new", status_code=303)
 
-    if source_type not in ("deye", "sunsynk"):
-        _flash(request, "danger", "Source type must be deye or sunsynk.")
+    if source_type not in VALID_SOURCE_TYPES:
+        _flash(request, "danger", f"Invalid source type '{source_type}'.")
+        return RedirectResponse(url="/sites/new", status_code=303)
+
+    if inverter_topology not in VALID_TOPOLOGIES:
+        _flash(request, "danger", f"Invalid inverter topology '{inverter_topology}'.")
         return RedirectResponse(url="/sites/new", status_code=303)
 
     lat = float(latitude) if latitude.strip() else None
     lon = float(longitude) if longitude.strip() else None
+
+    # Deye and Victron use the inverters JSONB array.
+    # Sunsynk and Sungrow use cloud credentials — no inverters array needed.
+    inverters_json = "[]" if source_type in ("deye", "victron") else None
 
     try:
         with get_connection() as conn:
@@ -200,22 +229,25 @@ async def sites_new_post(
                 text(
                     """
                     INSERT INTO sites (site_name, display_name, source_type,
-                                       location, latitude, longitude, enabled, inverters)
+                                       inverter_topology, location, latitude,
+                                       longitude, enabled, inverters)
                     VALUES (:site_name, :display_name, :source_type,
-                            :location, :latitude, :longitude, :enabled,
+                            :inverter_topology, :location, :latitude,
+                            :longitude, :enabled,
                             CAST(:inverters AS jsonb))
                     RETURNING id
                     """
                 ),
                 {
-                    "site_name": site_name,
-                    "display_name": display_name,
-                    "source_type": source_type,
-                    "location": location.strip() or None,
-                    "latitude": lat,
-                    "longitude": lon,
-                    "enabled": enabled == "on",
-                    "inverters": "[]" if source_type == "deye" else None,
+                    "site_name":         site_name,
+                    "display_name":      display_name,
+                    "source_type":       source_type,
+                    "inverter_topology": inverter_topology,
+                    "location":          location.strip() or None,
+                    "latitude":          lat,
+                    "longitude":         lon,
+                    "enabled":           enabled == "on",
+                    "inverters":         inverters_json,
                 },
             )
             new_id = result.fetchone()[0]
@@ -242,9 +274,9 @@ async def sites_edit_form(
         return RedirectResponse(url="/sites", status_code=303)
 
     site_users = _fetch_site_users(site_id)
-    all_users = _fetch_all_users()
+    all_users  = _fetch_all_users()
     # Exclude already-assigned users and admins from the add dropdown
-    assigned_ids = {u["id"] for u in site_users}
+    assigned_ids    = {u["id"] for u in site_users}
     available_users = [
         u for u in all_users
         if u["id"] not in assigned_ids and u["role_name"] != "admin"
@@ -254,7 +286,7 @@ async def sites_edit_form(
     inverters = []
     if site.get("inverters"):
         try:
-            raw = site["inverters"]
+            raw       = site["inverters"]
             inverters = raw if isinstance(raw, list) else json.loads(raw)
         except Exception:
             inverters = []
@@ -264,6 +296,7 @@ async def sites_edit_form(
         site=site, inverters=inverters,
         site_users=site_users, available_users=available_users,
         mode="edit", current_user=user,
+        valid_topologies=VALID_TOPOLOGIES,
     )
 
 
@@ -272,18 +305,24 @@ async def sites_edit_post(
     site_id: int,
     request: Request,
     user=Depends(require_role("admin")),
-    display_name: str = Form(""),
-    location: str = Form(""),
-    latitude: str = Form(""),
-    longitude: str = Form(""),
-    enabled: Optional[str] = Form(None),
-    # Sunsynk fields
-    sunsynk_username: str = Form(""),
-    sunsynk_password: str = Form(""),
-    sunsynk_plant_id: str = Form(""),
-    sunsynk_inverter_sns: str = Form(""),   # comma-separated SNs, optional fallback
+    display_name:      str           = Form(""),
+    inverter_topology: str           = Form("hybrid"),
+    location:          str           = Form(""),
+    latitude:          str           = Form(""),
+    longitude:         str           = Form(""),
+    enabled:           Optional[str] = Form(None),
+    # Sunsynk cloud credentials
+    sunsynk_username:     str = Form(""),
+    sunsynk_password:     str = Form(""),
+    sunsynk_plant_id:     str = Form(""),
+    sunsynk_inverter_sns: str = Form(""),
+    # Sungrow iSolarCloud credentials
+    sungrow_username:  str = Form(""),
+    sungrow_password:  str = Form(""),
+    sungrow_plant_id:  str = Form(""),
+    sungrow_device_sn: str = Form(""),
 ):
-    """POST /sites/{id}/edit — save site detail changes (display name, location, coordinates, enabled)."""
+    """POST /sites/{id}/edit — save site detail changes."""
     site = _fetch_site(site_id)
     if not site:
         _flash(request, "danger", "Site not found.")
@@ -294,72 +333,123 @@ async def sites_edit_post(
         _flash(request, "danger", "Display name is required.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
+    if inverter_topology not in VALID_TOPOLOGIES:
+        _flash(request, "danger", f"Invalid inverter topology '{inverter_topology}'.")
+        return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
+
     lat = float(latitude.strip()) if latitude.strip() else None
     lon = float(longitude.strip()) if longitude.strip() else None
 
     try:
         with get_connection() as conn:
-            if site["source_type"] == "sunsynk":
-                # Only update password if a new one was provided
+            source = site["source_type"]
+
+            if source == "sunsynk":
+                # Only update password if a new one was provided — blank means keep existing
                 new_password = sunsynk_password.strip()
                 if not new_password:
-                    # Keep existing password — fetch it
-                    existing_pw = conn.execute(
+                    new_password = conn.execute(
                         text("SELECT sunsynk_password FROM sites WHERE id = :id"),
                         {"id": site_id},
                     ).scalar()
-                    new_password = existing_pw
 
                 conn.execute(
                     text(
                         """
                         UPDATE sites SET
-                            display_name = :display_name,
-                            location = :location,
-                            latitude = :latitude,
-                            longitude = :longitude,
-                            enabled = :enabled,
-                            sunsynk_username = :sunsynk_username,
-                            sunsynk_password = :sunsynk_password,
-                            sunsynk_plant_id = :sunsynk_plant_id,
-                            updated_at = NOW()
+                            display_name      = :display_name,
+                            inverter_topology = :inverter_topology,
+                            location          = :location,
+                            latitude          = :latitude,
+                            longitude         = :longitude,
+                            enabled           = :enabled,
+                            sunsynk_username  = :sunsynk_username,
+                            sunsynk_password  = :sunsynk_password,
+                            sunsynk_plant_id  = :sunsynk_plant_id,
+                            updated_at        = NOW()
                         WHERE id = :id
                         """
                     ),
                     {
-                        "display_name": display_name,
-                        "location": location.strip() or None,
-                        "latitude": lat,
-                        "longitude": lon,
-                        "enabled": enabled == "on",
-                        "sunsynk_username": sunsynk_username.strip() or None,
-                        "sunsynk_password": new_password,
-                        "sunsynk_plant_id": sunsynk_plant_id.strip() or None,
-                        "sunsynk_inverter_sns": sunsynk_inverter_sns.strip() or None,
-                        "id": site_id,
+                        "display_name":      display_name,
+                        "inverter_topology": inverter_topology,
+                        "location":          location.strip() or None,
+                        "latitude":          lat,
+                        "longitude":         lon,
+                        "enabled":           enabled == "on",
+                        "sunsynk_username":  sunsynk_username.strip() or None,
+                        "sunsynk_password":  new_password,
+                        "sunsynk_plant_id":  sunsynk_plant_id.strip() or None,
+                        "id":                site_id,
                     },
                 )
-            else:
+
+            elif source == "sungrow":
+                # Only update password if a new one was provided — blank means keep existing
+                new_password = sungrow_password.strip()
+                if not new_password:
+                    new_password = conn.execute(
+                        text("SELECT sungrow_password FROM sites WHERE id = :id"),
+                        {"id": site_id},
+                    ).scalar()
+
                 conn.execute(
                     text(
                         """
                         UPDATE sites SET
-                            display_name = :display_name,
-                            location = :location,
-                            latitude = :latitude,
-                            longitude = :longitude,
-                            enabled = :enabled,
-                            updated_at = NOW()
+                            display_name      = :display_name,
+                            inverter_topology = :inverter_topology,
+                            location          = :location,
+                            latitude          = :latitude,
+                            longitude         = :longitude,
+                            enabled           = :enabled,
+                            sungrow_username  = :sungrow_username,
+                            sungrow_password  = :sungrow_password,
+                            sungrow_plant_id  = :sungrow_plant_id,
+                            sungrow_device_sn = :sungrow_device_sn,
+                            updated_at        = NOW()
                         WHERE id = :id
                         """
                     ),
                     {
-                        "display_name": display_name,
-                        "location": location.strip() or None,
-                        "latitude": lat,
-                        "longitude": lon,
-                        "enabled": enabled == "on",
-                        "id": site_id,
+                        "display_name":      display_name,
+                        "inverter_topology": inverter_topology,
+                        "location":          location.strip() or None,
+                        "latitude":          lat,
+                        "longitude":         lon,
+                        "enabled":           enabled == "on",
+                        "sungrow_username":  sungrow_username.strip() or None,
+                        "sungrow_password":  new_password,
+                        "sungrow_plant_id":  sungrow_plant_id.strip() or None,
+                        "sungrow_device_sn": sungrow_device_sn.strip() or None,
+                        "id":                site_id,
+                    },
+                )
+
+            else:
+                # Deye and Victron — no cloud credentials, topology only
+                conn.execute(
+                    text(
+                        """
+                        UPDATE sites SET
+                            display_name      = :display_name,
+                            inverter_topology = :inverter_topology,
+                            location          = :location,
+                            latitude          = :latitude,
+                            longitude         = :longitude,
+                            enabled           = :enabled,
+                            updated_at        = NOW()
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "display_name":      display_name,
+                        "inverter_topology": inverter_topology,
+                        "location":          location.strip() or None,
+                        "latitude":          lat,
+                        "longitude":         lon,
+                        "enabled":           enabled == "on",
+                        "id":                site_id,
                     },
                 )
     except Exception as e:
@@ -405,7 +495,7 @@ async def sites_delete(
     user=Depends(require_role("admin")),
     admin_password: str = Form(""),
 ):
-    """POST /sites/{id}/delete — delete the site and its user assignments. Solar readings are preserved."""
+    """POST /sites/{id}/delete — delete the site and its user assignments. Solar readings and weather data are kept."""
     if not admin_password or not _admin_password_matches(user, admin_password):
         _flash(request, "danger", "Admin password confirmation failed.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
@@ -425,7 +515,7 @@ async def sites_delete(
 
 
 # ---------------------------------------------------------------------------
-# Inverter management (Deye sites only)
+# Inverter management (Deye / Victron sites only)
 # ---------------------------------------------------------------------------
 
 @router.post("/{site_id}/inverters/add")
@@ -433,15 +523,15 @@ async def inverters_add(
     site_id: int,
     request: Request,
     user=Depends(require_role("admin")),
-    inv_name: str = Form(""),
-    inv_ip: str = Form(""),
+    inv_name:      str = Form(""),
+    inv_ip:        str = Form(""),
     dongle_serial: str = Form(""),
-    inverter_sn: str = Form(""),
+    inverter_sn:   str = Form(""),
 ):
     """POST /sites/{id}/inverters/add — append an inverter entry to the site JSONB inverters list."""
     site = _fetch_site(site_id)
-    if not site or site["source_type"] != "deye":
-        _flash(request, "danger", "Site not found or not a Deye site.")
+    if not site or site["source_type"] not in ("deye", "victron"):
+        _flash(request, "danger", "Site not found or not a Deye/Victron site.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     if not inv_name.strip() or not inv_ip.strip():
@@ -449,14 +539,22 @@ async def inverters_add(
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     try:
-        raw = site["inverters"]
+        raw       = site["inverters"]
         inverters = raw if isinstance(raw, list) else (json.loads(raw) if raw else [])
-        inverters.append({
-            "name": inv_name.strip(),
-            "ip": inv_ip.strip(),
-            "dongle_serial": int(dongle_serial) if dongle_serial.strip() else 0,
-            "inverter_sn": inverter_sn.strip(),
-        })
+
+        if site["source_type"] == "victron":
+            inverters.append({
+                "name":      inv_name.strip(),
+                "mqtt_host": inv_ip.strip(),
+            })
+        else:
+            inverters.append({
+                "name":          inv_name.strip(),
+                "ip":            inv_ip.strip(),
+                "dongle_serial": int(dongle_serial) if dongle_serial.strip() else 0,
+                "inverter_sn":   inverter_sn.strip(),
+            })
+
         with get_connection() as conn:
             conn.execute(
                 text(
@@ -486,12 +584,12 @@ async def inverters_delete(
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     site = _fetch_site(site_id)
-    if not site or site["source_type"] != "deye":
-        _flash(request, "danger", "Site not found or not a Deye site.")
+    if not site or site["source_type"] not in ("deye", "victron"):
+        _flash(request, "danger", "Site not found or not a Deye/Victron site.")
         return RedirectResponse(url=f"/sites/{site_id}/edit", status_code=303)
 
     try:
-        raw = site["inverters"]
+        raw       = site["inverters"]
         inverters = raw if isinstance(raw, list) else (json.loads(raw) if raw else [])
         if inv_idx < 0 or inv_idx >= len(inverters):
             _flash(request, "danger", "Inverter index out of range.")

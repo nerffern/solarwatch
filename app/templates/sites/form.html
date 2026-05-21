@@ -35,12 +35,37 @@
               <option value="deye">Deye — direct Modbus (Solarman V5)</option>
               <option value="sunsynk">Sunsynk — cloud API</option>
               <option value="victron">Victron — MQTT (Cerbo GX / CCGX)</option>
-              <option value="sungrow">Sungrow — direct Modbus (placeholder)</option>
+              <option value="sungrow">Sungrow — iSolarCloud API</option>
             </select>
           {% else %}
             <input class="sw-input" value="{{ site.source_type }}" disabled>
             <div class="sw-field-hint">Cannot be changed after creation.</div>
           {% endif %}
+        </div>
+      </div>
+
+      <!-- Inverter topology — shown on create and edit -->
+      <div class="sw-form-row cols-2">
+        <div class="sw-field">
+          <label>Inverter topology</label>
+          <select class="sw-select" name="inverter_topology">
+            <optgroup label="Hybrid (battery + grid)">
+              <option value="hybrid"             {% if (site and site.inverter_topology == 'hybrid')             or (not site) %}selected{% endif %}>Hybrid — single phase</option>
+              <option value="hybrid_three_phase"  {% if site and site.inverter_topology == 'hybrid_three_phase'  %}selected{% endif %}>Hybrid — three phase</option>
+            </optgroup>
+            <optgroup label="Grid-tie (no battery)">
+              <option value="grid_tie"            {% if site and site.inverter_topology == 'grid_tie'            %}selected{% endif %}>Grid-tie — single phase</option>
+              <option value="grid_tie_three_phase" {% if site and site.inverter_topology == 'grid_tie_three_phase' %}selected{% endif %}>Grid-tie — three phase</option>
+            </optgroup>
+            <optgroup label="Off-grid (no grid)">
+              <option value="off_grid"            {% if site and site.inverter_topology == 'off_grid'            %}selected{% endif %}>Off-grid — single phase</option>
+              <option value="off_grid_three_phase" {% if site and site.inverter_topology == 'off_grid_three_phase' %}selected{% endif %}>Off-grid — three phase</option>
+            </optgroup>
+          </select>
+          <div class="sw-field-hint">
+            Determines which dashboard template is served and which data fields are active.
+            Existing sites default to <strong>Hybrid — single phase</strong>.
+          </div>
         </div>
       </div>
 
@@ -76,7 +101,7 @@
         </label>
       </div>
 
-      <!-- Sunsynk credentials -->
+      <!-- ── Sunsynk cloud credentials ── -->
       <div id="sunsynk_fields" {% if mode == 'edit' and site.source_type != 'sunsynk' %}style="display:none"{% endif %}>
         <hr class="sw-divider">
         <div class="sw-card-title">Sunsynk cloud credentials</div>
@@ -108,6 +133,51 @@
         </div>
       </div>
 
+      <!-- ── Sungrow iSolarCloud credentials ── -->
+      <div id="sungrow_fields" {% if mode == 'edit' and site.source_type != 'sungrow' %}style="display:none"{% endif %}>
+        <hr class="sw-divider">
+        <div class="sw-card-title">Sungrow iSolarCloud credentials</div>
+        <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
+          Enter the plant owner's iSolarCloud account credentials. These are stored securely
+          and used only by the collector to fetch live data via the iSolarCloud API.
+        </p>
+        <div class="sw-form-row cols-2">
+          <div class="sw-field">
+            <label>Username (email)</label>
+            <input class="sw-input" name="sungrow_username"
+                   value="{{ site.sungrow_username if site else '' }}"
+                   placeholder="owner@example.com">
+            <div class="sw-field-hint">The plant owner's iSolarCloud login email.</div>
+          </div>
+          <div class="sw-field">
+            <label>Password</label>
+            <input class="sw-input" name="sungrow_password" type="password"
+                   placeholder="{% if mode == 'edit' %}Leave blank to keep existing{% else %}iSolarCloud password{% endif %}">
+          </div>
+          <div class="sw-field">
+            <label>Plant ID <span style="color:var(--muted);font-weight:400;font-size:.8rem">(ps_id)</span></label>
+            <input class="sw-input" name="sungrow_plant_id"
+                   value="{{ site.sungrow_plant_id if site else '' }}"
+                   placeholder="e.g. 1713768">
+            <div class="sw-field-hint">
+              Found by running <code>test_sungrow.py</code> — printed in the summary at the end.
+              Leave blank to auto-discover on first poll (costs 1 extra API call per restart).
+            </div>
+          </div>
+          <div class="sw-field">
+            <label>Device key <span style="color:var(--muted);font-weight:400;font-size:.8rem">(ps_key — optional)</span></label>
+            <input class="sw-input" name="sungrow_device_sn"
+                   value="{{ site.sungrow_device_sn if site else '' }}"
+                   placeholder="e.g. 1713768_1_2_1">
+            <div class="sw-field-hint">
+              Also from <code>test_sungrow.py</code>. Leave blank — the collector discovers
+              the inverter automatically from the plant. Only needed if you have multiple inverters
+              and want to pin a specific one.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style="margin-top:1.25rem">
         <button class="sw-btn primary" type="submit">
           {% if mode == 'create' %}Create site{% else %}Save changes{% endif %}
@@ -118,8 +188,8 @@
 
   {% if mode == 'edit' %}
 
-  <!-- ── Inverters / Device config (Deye, Victron, Sungrow) ── -->
-  {% if site.source_type in ('deye', 'victron', 'sungrow') %}
+  <!-- ── Inverters / Device config (Deye, Victron only — Sungrow uses cloud credentials above) ── -->
+  {% if site.source_type in ('deye', 'victron') %}
   <div class="sw-card">
 
     {% if site.source_type == 'deye' %}
@@ -132,12 +202,6 @@
       <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
         Add one entry pointing to your Cerbo GX local IP address. The collector connects via MQTT
         and discovers all attached MPPTs and battery monitors automatically.
-        Leave dongle serial and inverter SN blank.
-      </p>
-    {% elif site.source_type == 'sungrow' %}
-      <div class="sw-card-title">Inverters</div>
-      <p style="color:var(--muted);font-size:.82rem;margin-bottom:.75rem">
-        Sungrow support is a placeholder — add inverter details now, collection will start once the worker is implemented.
       </p>
     {% endif %}
 
@@ -187,7 +251,6 @@
     </div>
     <form method="post" action="/sites/{{ site.id }}/inverters/add">
       {% if site.source_type == 'victron' %}
-      <!-- Victron: only needs name and MQTT host -->
       <div class="sw-form-row" style="grid-template-columns:2fr 3fr auto;gap:.5rem;align-items:end">
         <div class="sw-field">
           <label>Name</label>
@@ -203,7 +266,6 @@
         </div>
       </div>
       {% else %}
-      <!-- Deye / Sungrow: full inverter details -->
       <div class="sw-form-row" style="grid-template-columns:2fr 2fr 1.5fr 1.5fr auto;gap:.5rem;align-items:end">
         <div class="sw-field">
           <label>Name</label>
@@ -327,14 +389,22 @@
 </div>
 
 <script>
+// Show/hide the correct credentials section when source type changes (create mode only).
+// In edit mode the source_type field is disabled so it can never change.
 const sel = document.getElementById('source_type_select');
 if (sel) {
-  const sf = document.getElementById('sunsynk_fields');
-  sel.addEventListener('change', () => {
-    sf.style.display = sel.value === 'sunsynk' ? '' : 'none';
-  });
-  // Trigger on load in case of form re-render with a value selected
-  sel.dispatchEvent(new Event('change'));
+  const sunsynkFields = document.getElementById('sunsynk_fields');
+  const sungrowFields = document.getElementById('sungrow_fields');
+
+  function updateCredentialFields() {
+    sunsynkFields.style.display = sel.value === 'sunsynk' ? '' : 'none';
+    sungrowFields.style.display = sel.value === 'sungrow' ? '' : 'none';
+  }
+
+  sel.addEventListener('change', updateCredentialFields);
+  // Run on load so the correct section is visible if the form was re-rendered
+  // after a validation error with a non-default source type selected.
+  updateCredentialFields();
 }
 </script>
 {% endblock %}

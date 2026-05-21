@@ -83,12 +83,25 @@ def _query_all(sql: str, params: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _get_sites() -> list[dict]:
-    """Return the list of site names accessible to the current user. Cached 10s."""
+    """Return the list of enabled sites with name, display name, and inverter topology.
+
+    topology is included so the frontend JS can detect when switching sites requires
+    a full page reload (e.g. switching from a hybrid site to a grid-tie site serves
+    a different HTML template — a JS-only data refresh is not sufficient).
+    """
     rows = _query_all(
-        "SELECT site_name, display_name FROM sites WHERE enabled = TRUE ORDER BY display_name",
+        """SELECT site_name, display_name, inverter_topology
+           FROM sites WHERE enabled = TRUE ORDER BY display_name""",
         {},
     )
-    return [{"name": r["site_name"], "display": r["display_name"]} for r in rows]
+    return [
+        {
+            "name":     r["site_name"],
+            "display":  r["display_name"],
+            "topology": r["inverter_topology"] or "hybrid",
+        }
+        for r in rows
+    ]
 
 
 def _resolve_site(site: Optional[str], accessible: list[str]) -> Optional[str]:
@@ -123,6 +136,9 @@ def _get_flow(site: str) -> dict:
             COALESCE(AVG(battery_voltage),0)::numeric(5,2)             AS batt_v,
             COALESCE(AVG(grid_voltage),  0)::numeric(5,1)              AS grid_v,
             COALESCE(AVG(grid_frequency),0)::numeric(5,2)              AS grid_hz,
+            COALESCE(SUM(dc_temp),       0)::numeric(9,2)              AS dc_power_w,
+            COALESCE(AVG(inverter_temp), 0)::numeric(5,1)              AS inverter_temp,
+            SUM(total_pv_energy)::numeric(12,2)                        AS total_pv_energy,
             MAX(time)                                                   AS last_poll
         FROM (
             SELECT DISTINCT ON (inverter_name)
@@ -130,7 +146,7 @@ def _get_flow(site: str) -> dict:
                 pv1_power, pv2_power,
                 battery_power, battery_soc, battery_temp, battery_voltage,
                 grid_power, grid_voltage, grid_frequency,
-                load_power, time
+                load_power, dc_temp, inverter_temp, total_pv_energy, time
             FROM solar_readings
             WHERE site_name ILIKE :site
             AND time > NOW() - INTERVAL '10 minutes'
@@ -160,9 +176,12 @@ def _get_flow(site: str) -> dict:
         "soc":       float(row["soc"]       or 0),
         "batt_temp": float(row["batt_temp"] or 0),
         "batt_v":    float(row["batt_v"]    or 0),
-        "grid_v":    float(row["grid_v"]    or 0),
-        "grid_hz":   float(row["grid_hz"]   or 0),
-        "age_s":     age_s,
+        "grid_v":      float(row["grid_v"]        or 0),
+        "grid_hz":     float(row["grid_hz"]       or 0),
+        "dc_power_w":  float(row["dc_power_w"]    or 0),
+        "inverter_temp": float(row["inverter_temp"] or 0),
+        "total_pv_energy": float(row["total_pv_energy"]) if row.get("total_pv_energy") is not None else None,
+        "age_s":       age_s,
         "stale":     age_s is not None and age_s > 300,
     }
 
@@ -673,16 +692,56 @@ def _serialise(obj: Any) -> Any:
 # Routes
 # ---------------------------------------------------------------------------
 
+# Maps inverter_topology values to their dashboard template file.
+# Topologies not listed here fall back to the default hybrid dashboard.
+# This dict is the single source of truth for template routing —
+# adding a new topology only requires adding one line here.
+_TOPOLOGY_TEMPLATE: dict[str, str] = {
+    "hybrid":               "dashboard.html",
+    "hybrid_three_phase":   "dashboard.html",        # uses hybrid template until dedicated one is built
+    "grid_tie":             "dashboard_gridtie.html",
+    "grid_tie_three_phase": "dashboard_gridtie.html",
+    "off_grid":             "dashboard.html",        # uses hybrid template until dedicated one is built
+    "off_grid_three_phase": "dashboard.html",
+}
+
+
+def _get_site_topology(site_name: str) -> str:
+    """Return the inverter_topology for a site, defaulting to 'hybrid' if not found.
+
+    Used by the dashboard route to select the correct template.
+    A missing or unknown topology gracefully falls back to 'hybrid'
+    so existing sites are never broken by a misconfigured value.
+    """
+    row = _query_one(
+        "SELECT inverter_topology FROM sites WHERE site_name ILIKE :site",
+        {"site": site_name},
+    )
+    return row.get("inverter_topology") or "hybrid"
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, user=Depends(login_required)):
-    """Full-screen power flow dashboard — requires login."""
-    from starlette.responses import Response
+    """Full-screen power flow dashboard — requires login.
+
+    Selects the correct template based on the first accessible site's
+    inverter_topology. If the user switches sites via the JS site selector,
+    the frontend reloads the page with ?site=... so the correct template
+    is always served.
+    """
+    accessible = get_accessible_sites(user)
+    # Determine topology from the first accessible site (or query param if provided)
+    site_param = request.query_params.get("site")
+    site_name  = _resolve_site(site_param, accessible) if accessible else None
+    topology   = _get_site_topology(site_name) if site_name else "hybrid"
+    template   = _TOPOLOGY_TEMPLATE.get(topology, "dashboard.html")
+
     response = templates.TemplateResponse(
-        "dashboard.html",
+        template,
         {
-            "request": request,
+            "request":      request,
             "current_user": user,
-            "flash": _consume_flash(request),
+            "flash":        _consume_flash(request),
         },
     )
     # Prevent browser and intermediate caches from storing this page.

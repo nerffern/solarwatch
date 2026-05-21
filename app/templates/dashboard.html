@@ -1019,14 +1019,20 @@ function updateGridPill(d){
     pill.className = 'gp-off';
     txt.textContent = '⚡ Grid Off';
   } else if(d.grid_v < 200 && d.grid_v > 0){
+    // Voltage present but below nominal — unusual, flag without repeating the node value
     pill.className = 'gp-warn';
-    txt.textContent = 'Grid ' + d.grid_v.toFixed(0) + 'V';
+    txt.textContent = 'Grid Low';
   } else if(d.grid_w > 15){
+    // Importing from grid — status only, no watt value (already on the Grid node)
     pill.className = 'gp-on';
-    txt.textContent = 'Grid ' + fmt(d.grid_w);
+    txt.textContent = 'Importing';
+  } else if(d.grid_w < -15){
+    // Exporting to grid
+    pill.className = 'gp-on';
+    txt.textContent = 'Exporting';
   } else {
     pill.className = 'gp-on';
-    txt.textContent = d.grid_w < -15 ? 'Grid Export' : 'Grid On';
+    txt.textContent = 'Grid On';
   }
 }
 
@@ -1784,12 +1790,22 @@ function updateURL(siteName){
   window.history.replaceState({},'',url.toString());
 }
 
+// Topologies that use the hybrid (this) template — no reload needed when switching between these.
+// Any topology NOT in this set requires a full page reload to load the correct template.
+const HYBRID_TOPOLOGIES = new Set(['hybrid','hybrid_three_phase','off_grid','off_grid_three_phase']);
+
+// Global site list — keyed by name for fast topology lookup in onSiteChange()
+let _siteTopologies = {};
+
 async function loadSites(){
   const r=await fetch('/api/solar/sites');
   const sites=await r.json();
   const sel=document.getElementById('site-sel');
   sel.innerHTML=sites.map(s=>`<option value="${s.name}">${s.display}</option>`).join('');
   if(!sites.length) return;
+
+  // Cache topology for each site — used in onSiteChange() to detect template switches
+  sites.forEach(s=>{ _siteTopologies[s.name] = s.topology || 'hybrid'; });
 
   // Priority: 1) ?site= URL param  2) localStorage  3) first site
   const urlParam=new URLSearchParams(window.location.search).get('site');
@@ -1804,8 +1820,22 @@ async function loadSites(){
 }
 
 function onSiteChange(){
-  currentSite=document.getElementById('site-sel').value;
-  localStorage.setItem('sw_site',currentSite);
+  const newSite = document.getElementById('site-sel').value;
+  localStorage.setItem('sw_site', newSite);
+
+  // If the new site uses a different template family (grid-tie vs hybrid),
+  // we must do a full page reload — a JS data refresh is not sufficient
+  // because the HTML structure, nodes, and charts are completely different.
+  const newTopology = _siteTopologies[newSite] || 'hybrid';
+  const needsReload = !HYBRID_TOPOLOGIES.has(newTopology);
+  if(needsReload){
+    const url = new URL(window.location.href);
+    url.searchParams.set('site', newSite);
+    window.location.href = url.toString();
+    return;
+  }
+
+  currentSite = newSite;
   updateURL(currentSite);
   if(liveTimer)clearTimeout(liveTimer);
   if(wxTimer)clearTimeout(wxTimer);

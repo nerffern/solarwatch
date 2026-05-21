@@ -42,12 +42,18 @@
             </td>
             <td style="color:var(--muted);font-size:.85rem">{{ site.location or '—' }}</td>
             <td style="color:var(--muted);font-size:.85rem">
-              {% if site.source_type in ('deye', 'victron', 'sungrow') and site.inverters %}
+              {% if site.source_type == 'deye' and site.inverters %}
                 {{ site.inverters | length }} device{{ 's' if site.inverters | length != 1 }}
-              {% elif site.source_type in ('deye', 'victron', 'sungrow') %}
+              {% elif site.source_type == 'deye' %}
+                None configured
+              {% elif site.source_type == 'victron' and site.inverters %}
+                {{ site.inverters | length }} device{{ 's' if site.inverters | length != 1 }}
+              {% elif site.source_type == 'victron' %}
                 None configured
               {% elif site.source_type == 'sunsynk' %}
                 {% if site.sunsynk_plant_id %}1 plant{% else %}Cloud API{% endif %}
+              {% elif site.source_type == 'sungrow' %}
+                {% if site.sungrow_plant_id %}1 plant{% else %}Cloud API{% endif %}
               {% else %}
                 —
               {% endif %}
