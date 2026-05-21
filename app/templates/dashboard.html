@@ -515,6 +515,57 @@ footer{
   width:8px;height:8px;border-radius:50%;background:#fff;
   animation:pulse 1.5s infinite;flex-shrink:0;
 }
+
+/* ── GRID STATUS PILL ────────────────────────────────────────────────────────
+ * Always-visible header pill showing live grid state.
+ * Updated on every render() call by updateGridPill().
+ * States: .gp-on (green) | .gp-warn (amber) | .gp-off (red, pulsing dot)
+ * ─────────────────────────────────────────────────────────────────────────── */
+#grid-pill{
+  display:flex;align-items:center;gap:5px;
+  padding:4px 10px;border-radius:6px;border:1px solid var(--border);
+  background:var(--s2);font-family:var(--sans);
+  font-size:clamp(9px,.85vw,13px);font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;
+  transition:background .4s,border-color .4s,color .4s;white-space:nowrap;
+}
+#grid-pill .gp-dot{
+  width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0;
+}
+#grid-pill.gp-on  { color:var(--green);border-color:rgba(46,204,113,.35) }
+#grid-pill.gp-warn{ color:var(--amber);border-color:rgba(243,156,18,.35) }
+#grid-pill.gp-off {
+  color:var(--red);border-color:rgba(231,76,60,.45);background:rgba(231,76,60,.08);
+}
+#grid-pill.gp-off .gp-dot{ animation:pulse 1.2s infinite }
+
+/* ── GRID ALERT BANNER ───────────────────────────────────────────────────────
+ * Contextual alert under the SOC gauge. Hidden by default; slides in when a
+ * grid failure is detected. Severity classes drive colour and animation.
+ * States: .ga-warning (amber) | .ga-critical (red, pulsing title)
+ * ─────────────────────────────────────────────────────────────────────────── */
+#grid-alert{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  width:100%;padding:0 12px;
+  max-height:0;overflow:hidden;opacity:0;
+  transition:max-height .4s ease,opacity .4s ease,padding .4s ease;
+}
+#grid-alert.ga-visible{ max-height:120px;opacity:1;padding:10px 12px 4px }
+.ga-title{
+  font-family:var(--sans);font-size:clamp(11px,1.1vw,14px);
+  font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  display:flex;align-items:center;gap:6px;
+}
+.ga-body{
+  font-family:var(--sans);font-size:clamp(10px,.95vw,13px);
+  font-weight:400;opacity:.85;text-align:center;line-height:1.4;
+}
+#grid-alert.ga-warning .ga-title{ color:var(--amber) }
+#grid-alert.ga-warning .ga-body { color:var(--amber) }
+#grid-alert.ga-critical .ga-title{
+  color:var(--red);animation:pulse 2s ease-in-out infinite;
+}
+#grid-alert.ga-critical .ga-body{ color:var(--red) }
 </style>
 </head>
 <body>
@@ -600,6 +651,11 @@ footer{
 
     <!-- Age -->
     <div class="age-badge"><div class="dot" id="dot"></div><span id="age">—</span></div>
+    <!-- Grid status pill — always visible, updated every 10 s by updateGridPill() -->
+    <div id="grid-pill" class="gp-on" role="status" aria-live="polite" aria-label="Grid status">
+      <div class="gp-dot"></div>
+      <span id="grid-pill-txt">Grid</span>
+    </div>
   </div>
 </header>
 
@@ -677,6 +733,12 @@ footer{
         </div>
       </div>
       <div class="s-msg" id="smsg">Loading...</div>
+      <!-- Grid alert banner — hidden until a grid failure is detected.
+           updateGridAlert() sets severity class + text on every render() call. -->
+      <div id="grid-alert" role="alert" aria-live="assertive">
+        <div class="ga-title"><span id="ga-icon">⚡</span><span id="ga-title-txt"></span></div>
+        <div class="ga-body" id="ga-body-txt"></div>
+      </div>
     </div>
     <div class="flow-area" id="fa">
       <svg id="flow-svg" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -807,6 +869,14 @@ let rateMode='flat', flatRate=4.50;
 let liveTimer=null, chartTimer=null;
 let charts={};
 window._ld=null;
+// ── GRID ALERT STATE ──────────────────────────────────────────────────────────
+// _gridWasOff   : true while a confirmed outage is active — resets on grid return.
+// _lastBeepSoc  : SOC at which we last beeped; prevents re-beeping same threshold.
+// _alertSocThreshold : critical SOC level (default 25%). Override via:
+//   localStorage.setItem('sw_alert_soc', '30')  — e.g. for smaller batteries.
+let _gridWasOff = false;
+let _lastBeepSoc = null;
+const _alertSocThreshold = parseInt(localStorage.getItem('sw_alert_soc') || '25', 10);
 
 const IBT_RATES=[2.9790,3.4864,3.7983,4.0948]; // Tshwane 2025/26 excl VAT ×1.15
 
@@ -912,6 +982,164 @@ function status(d){
   if(d.soc>80||d.solar_w>3000) return{cls:'sg',badge:'PLENTY OF POWER',msg:'Safe to run heavy appliances ✓'};
   if(d.soc>40||d.solar_w>1000) return{cls:'sa',badge:'MODERATE',msg:'Light usage recommended'};
   return{cls:'sr',badge:'CONSERVE POWER',msg:'Avoid heavy appliances'};
+}
+
+// ── GRID FAILURE DETECTION ───────────────────────────────────────────────────
+/**
+ * isGridOff(d) — true when a real outage is confirmed, false when merely idle.
+ *
+ * Uses two conditions to avoid false positives on self-sufficient systems:
+ *   grid_w  ±15 W  → no power flowing either way
+ *   grid_v  < 180V → voltage has collapsed (idle grid stays at ~230V)
+ *
+ * @param {Object} d — live data from /api/solar/flow or /api/share/{token}/flow
+ * @returns {boolean}
+ */
+function isGridOff(d){
+  return Math.abs(d.grid_w) < 15 && d.grid_v < 180;
+}
+
+// ── GRID PILL UPDATE ──────────────────────────────────────────────────────────
+/**
+ * updateGridPill(d) — refresh the header grid pill on every render() call.
+ *
+ * Visual states:
+ *   gp-on   — healthy grid (idle or exporting, voltage present)
+ *   gp-warn — voltage below 200V but not fully collapsed (unusual)
+ *   gp-off  — confirmed outage (voltage collapsed, red pulsing dot)
+ *
+ * @param {Object} d — live data object
+ */
+function updateGridPill(d){
+  const pill = document.getElementById('grid-pill');
+  const txt  = document.getElementById('grid-pill-txt');
+  if(!pill || !txt) return;
+
+  if(isGridOff(d)){
+    pill.className = 'gp-off';
+    txt.textContent = '⚡ Grid Off';
+  } else if(d.grid_v < 200 && d.grid_v > 0){
+    pill.className = 'gp-warn';
+    txt.textContent = 'Grid ' + d.grid_v.toFixed(0) + 'V';
+  } else if(d.grid_w > 15){
+    pill.className = 'gp-on';
+    txt.textContent = 'Grid ' + fmt(d.grid_w);
+  } else {
+    pill.className = 'gp-on';
+    txt.textContent = d.grid_w < -15 ? 'Grid Export' : 'Grid On';
+  }
+}
+
+// ── GRID ALERT BANNER ─────────────────────────────────────────────────────────
+/**
+ * updateGridAlert(d) — show or hide the contextual alert under the SOC gauge.
+ *
+ * Severity combines grid state + SOC + solar + time of day:
+ *   ga-warning  — grid off, situation manageable (SOC ok or solar present)
+ *   ga-critical — grid off AND battery low AND no solar (worst case)
+ *
+ * Clears and resets beep state when grid returns.
+ *
+ * @param {Object} d — live data object
+ */
+function updateGridAlert(d){
+  const el      = document.getElementById('grid-alert');
+  const titleEl = document.getElementById('ga-title-txt');
+  const bodyEl  = document.getElementById('ga-body-txt');
+  const iconEl  = document.getElementById('ga-icon');
+  if(!el || !titleEl || !bodyEl) return;
+
+  const gridOff  = isGridOff(d);
+  const isNight  = (()=>{
+    const h = new Date().toLocaleString('en-ZA',{hour:'numeric',hour12:false,timeZone:'Africa/Johannesburg'})*1;
+    return h >= 18 || h < 6;
+  })();
+  const lowSoc   = d.soc < _alertSocThreshold;
+  const noSolar  = d.solar_w < 200;
+  const critical = gridOff && lowSoc && noSolar;
+
+  if(!gridOff){
+    // Grid restored — hide banner and reset beep tracking
+    el.classList.remove('ga-visible','ga-warning','ga-critical');
+    _gridWasOff  = false;
+    _lastBeepSoc = null;
+    return;
+  }
+
+  // Compose severity-appropriate message
+  let severity, title, body;
+  if(critical){
+    severity = 'ga-critical';
+    iconEl.textContent = '🔴';
+    title = 'Grid Failure — Battery Critical';
+    body  = isNight && noSolar
+      ? `Battery at ${d.soc.toFixed(0)}% with no grid or solar — switch off non-essential loads`
+      : `Battery at ${d.soc.toFixed(0)}% — conserve power until grid returns`;
+  } else {
+    severity = 'ga-warning';
+    iconEl.textContent = '⚡';
+    title = 'Grid Failure';
+    body  = d.soc > 60
+      ? 'Running on solar and battery — system healthy'
+      : `Battery at ${d.soc.toFixed(0)}% — limit heavy appliances`;
+  }
+
+  el.className = '';
+  el.classList.add('ga-visible', severity);
+  titleEl.textContent = title;
+  bodyEl.textContent  = body;
+  _gridWasOff = true;
+}
+
+// ── GRID ALERT BEEP ───────────────────────────────────────────────────────────
+/**
+ * maybeBeep(d) — play a one-time audio alert at each 5% SOC threshold during
+ * a grid outage. Synthesised via Web Audio API — no file dependency, offline-safe.
+ *
+ * Fires when ALL of these are true:
+ *   • Grid is confirmed off (isGridOff)
+ *   • SOC < _alertSocThreshold (default 25%)
+ *   • Solar < 200W (no meaningful generation)
+ *   • This 5% threshold hasn't been beeped this outage (_lastBeepSoc)
+ *
+ * Re-beeps as SOC falls through 25→20→15→10% etc.
+ * Resets when grid returns (handled in updateGridAlert).
+ *
+ * @param {Object} d — live data object
+ */
+function maybeBeep(d){
+  if(!isGridOff(d) || d.soc >= _alertSocThreshold || d.solar_w >= 200) return;
+
+  const threshold = Math.floor(d.soc / 5) * 5;
+  if(_lastBeepSoc !== null && threshold >= _lastBeepSoc) return;
+
+  try{
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+
+    /** Play one sine-wave tone burst with a clean fade-out. */
+    function tone(freq, start, dur){
+      const osc  = actx.createOscillator();
+      const gain = actx.createGain();
+      osc.connect(gain);
+      gain.connect(actx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.35, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+      osc.start(start);
+      osc.stop(start + dur);
+    }
+
+    const t = actx.currentTime;
+    tone(750, t,        0.18);   // high beep
+    tone(500, t + 0.28, 0.22);   // low  beep
+    setTimeout(() => actx.close(), 800);
+
+    _lastBeepSoc = threshold;
+    console.log('[SolarWatch] Grid alert beep at SOC:', d.soc.toFixed(1) + '%');
+  } catch(e){
+    console.warn('[SolarWatch] Beep unavailable:', e.message);
+  }
 }
 
 // ── FLOW LINES ────────────────────────────────────────────────────────────────
@@ -1051,6 +1279,11 @@ function render(d){
   }
 
   drawLines(d);
+
+  // ── Grid failure features (called last so DOM is fully updated) ──────────
+  updateGridPill(d);    // header pill  — always-visible grid state
+  updateGridAlert(d);   // SOC banner   — contextual outage message
+  maybeBeep(d);         // audio alert  — one beep per 5% SOC threshold
 }
 
 // ── CHART HELPERS ─────────────────────────────────────────────────────────────
