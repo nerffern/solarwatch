@@ -563,7 +563,7 @@ footer{border-top:1px solid var(--border);background:var(--surface);flex-shrink:
     <div class="stat"><span class="st-lbl">PV Today</span><span class="st-val" id="f-pv" style="color:var(--solar)">—</span></div>
     <div class="stat"><span class="st-lbl">DC Power</span><span class="st-val" id="f-dc">—</span></div>
     <div class="stat"><span class="st-lbl">Site Load</span><span class="st-val" id="f-load" style="color:var(--load)">—</span></div>
-    <div class="stat"><span class="st-lbl">Grid Export</span><span class="st-val" id="f-export" style="color:var(--green)">—</span></div>
+    <div class="stat"><span class="st-lbl" id="f-grid-lbl">Grid</span><span class="st-val" id="f-export">—</span></div>
     <div class="stat"><span class="st-lbl">Grid V</span><span class="st-val" id="f-gv">—</span></div>
     <div class="stat"><span class="st-lbl">Frequency</span><span class="st-val" id="f-hz">—</span></div>
     <div class="stat"><span class="st-lbl">Efficiency</span><span class="st-val" id="f-eff">—</span></div>
@@ -608,7 +608,6 @@ footer{border-top:1px solid var(--border);background:var(--surface);flex-shrink:
 // Power Factor removed — not stored in solar_readings for Sungrow.
 
 const GRIDTIE_TOPOLOGIES = new Set(['grid_tie','grid_tie_three_phase']);
-// ── Share mode ─────────────────────────────────────────────────────────────
 const SHARE_TOKEN = '{{ share_token }}';
 const SHARE_SITE  = '{{ site_name }}';
 const IS_SHARE    = Boolean(SHARE_TOKEN);
@@ -736,8 +735,8 @@ function updateGridPill(d){
   const txt=document.getElementById('grid-pill-txt');
   if(!pill||!txt) return;
   const generating  = (d.solar_w||0) > 15;
-  const isExporting = (d.grid_w||0) < -15;
-  const isImporting = (d.grid_w||0) > 15;
+  const isExporting = (d.grid_w||0) < -5;
+  const isImporting = (d.grid_w||0) > 5;
   const gridOff     = generating && (d.grid_v||0) < 180;
   if(gridOff){
     pill.className='gp-off'; txt.textContent='⚡ Grid Off';
@@ -768,9 +767,11 @@ function drawLines(d){
     grid: {x:W*.78, y:H*.78},
   };
   const gridW    = d.grid_w||0;
-  const loadW    = d.load_w||0;
-  const isExp    = gridW < -15;
-  const isImp    = gridW > 15;
+  // Use last known load value if current is null (same logic as render())
+  if(d.load_w !== null && d.load_w !== undefined) window._lastLoadW = d.load_w;
+  const loadW    = d.load_w !== null && d.load_w !== undefined ? d.load_w : (window._lastLoadW||0);
+  const isExp    = gridW < -5;
+  const isImp    = gridW > 5;
   const gc       = isExp ? 'var(--gout)' : isImp ? 'var(--gin)' : 'var(--muted)';
   const lc       = loadW > 15 ? 'var(--load)' : 'var(--muted)';
   const pad      = Math.min(W,H)*.08;
@@ -788,7 +789,7 @@ function drawLines(d){
   svg.innerHTML='';
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.appendChild(seg(pos.solar, pos.hub, fdir(d.solar_w||0), spd(d.solar_w||0), 'var(--solar)'));
-  svg.appendChild(seg(pos.hub, pos.load, loadW>15?'fwd':'idle', spd(loadW), lc));
+  svg.appendChild(seg(pos.hub, pos.load, loadW>5?'fwd':'idle', spd(loadW), lc));
   svg.appendChild(seg(pos.hub, pos.grid, isExp?'fwd':isImp?'rev':'idle', spd(Math.abs(gridW)), gc));
 }
 
@@ -831,7 +832,16 @@ function render(d){
   // ── Stats panel (left) ───────────────────────────────────────────────────────
   const isGen = acW > 50;
   document.getElementById('gsp').className = 'gt-stats-panel ' + (isGen ? 'gt-on' : 'gt-idle');
-  document.getElementById('gt-badge').textContent = isGen ? 'GENERATING' : acW > 5 ? 'LOW OUTPUT' : 'OFFLINE';
+  // Badge states:
+  //   GENERATING  — inverter actively converting DC to AC (normal daytime)
+  //   LOW OUTPUT  — generating but below 50W (dawn/dusk threshold)
+  //   STANDBY     — DC input present but AC output zero (inverter alive, not converting)
+  //   OFFLINE     — no DC and no AC (night, or genuine inverter fault)
+  const badgeText = isGen         ? 'GENERATING'
+                  : acW > 5       ? 'LOW OUTPUT'
+                  : dcW > 50      ? 'STANDBY'
+                  :                 'OFFLINE';
+  document.getElementById('gt-badge').textContent = badgeText;
 
   // AC output: split value and unit for clean display
   const [acVal, acUnit] = fmtParts(acW);
@@ -860,12 +870,21 @@ function render(d){
   document.getElementById('nd-solar').style.borderColor = isGen ? 'rgba(245,166,35,.45)' : '';
 
   // ── Load node ────────────────────────────────────────────────────────────────
-  // loadW is null when no meter readings exist yet in the DB.
-  const hasLoad = loadW !== null && loadW > 5;
+  // loadW is null when no meter readings exist in the last 20 minutes.
+  // Preserve the last known value to avoid flickering "No meter" during
+  // brief collection gaps (e.g. iSolarCloud API slow to respond).
+  if(loadW !== null) window._lastLoadW = loadW;
+  const effectiveLoadW = loadW !== null ? loadW : (window._lastLoadW || null);
+  const hasLoad = effectiveLoadW !== null && effectiveLoadW >= 0;
+  const loadW_display = effectiveLoadW;
   const loadEl  = document.getElementById('v-load');
-  loadEl.textContent   = hasLoad ? fmt(loadW) : '—';
+  loadEl.textContent   = hasLoad ? fmt(loadW_display) : '—';
   loadEl.style.color   = hasLoad ? 'var(--load)' : 'var(--muted)';
-  document.getElementById('s-load').textContent = hasLoad ? 'Site use' : 'No meter';
+  // Show "stale" indicator if using cached value, "No meter" if never had data
+  const loadSubText = hasLoad
+    ? (loadW === null ? 'cached' : 'Site use')
+    : 'No meter';
+  document.getElementById('s-load').textContent = loadSubText;
   document.getElementById('nd-load').style.borderColor = hasLoad ? 'rgba(79,195,247,.35)' : '';
 
   // Self-sufficiency sub-line on Load node
@@ -884,9 +903,9 @@ function render(d){
   }
 
   // ── Grid node ────────────────────────────────────────────────────────────────
-  const importing = gridW > 15;
-  const exporting = gridW < -15;
-  const gridPwr   = Math.abs(gridW) > 15 ? fmt(Math.abs(gridW)) : (gridV ? gridV.toFixed(0)+'V' : '—');
+  const importing = gridW > 5;
+  const exporting = gridW < -5;
+  const gridPwr   = Math.abs(gridW) > 5 ? fmt(Math.abs(gridW)) : (gridV ? gridV.toFixed(0)+'V' : '—');
   const gridColor = importing ? 'var(--gin)' : exporting ? 'var(--gout)' : 'var(--muted)';
   document.getElementById('v-grid').textContent = gridPwr;
   document.getElementById('v-grid').style.color = gridColor;
@@ -924,8 +943,25 @@ function render(d){
   // ── Footer basic ──────────────────────────────────────────────────────────────
   document.getElementById('f-pv').textContent     = pvToday + ' kWh';
   document.getElementById('f-dc').textContent     = dcW > 0 ? fmt(dcW) : '—';
-  document.getElementById('f-load').textContent   = hasLoad ? fmt(loadW) : '—';
-  document.getElementById('f-export').textContent = gridExport > 15 ? fmt(gridExport) : '—';
+  document.getElementById('f-load').textContent   = hasLoad ? fmt(loadW_display) : '—';
+  // Footer grid: show import (red) OR export (green) — always meaningful
+  const fExportEl  = document.getElementById('f-export');
+  const fGridLbl   = document.getElementById('f-grid-lbl');
+  if(fExportEl){
+    if(importing){
+      fExportEl.textContent = fmt(gridImport);
+      fExportEl.style.color = 'var(--gin)';
+      if(fGridLbl) fGridLbl.textContent = 'Importing';
+    } else if(exporting){
+      fExportEl.textContent = fmt(gridExport);
+      fExportEl.style.color = 'var(--gout)';
+      if(fGridLbl) fGridLbl.textContent = 'Exporting';
+    } else {
+      fExportEl.textContent = gridV ? gridV.toFixed(0)+'V' : '—';
+      fExportEl.style.color = 'var(--muted)';
+      if(fGridLbl) fGridLbl.textContent = 'Grid';
+    }
+  }
   document.getElementById('f-gv').textContent     = gridV  ? gridV.toFixed(0)  + 'V'  : '—';
   document.getElementById('f-hz').textContent     = gridHz ? gridHz.toFixed(2) + 'Hz' : '—';
   document.getElementById('f-eff').textContent    = effStr;
@@ -933,7 +969,7 @@ function render(d){
 
   // ── Footer advanced ───────────────────────────────────────────────────────────
   document.getElementById('fa-pv').textContent     = pvToday + ' kWh';
-  document.getElementById('fa-export').textContent = gridExport > 15 ? fmt(gridExport) : '—';
+  document.getElementById('fa-export').textContent = gridExport > 5 ? fmt(gridExport) : '—';
   document.getElementById('fa-total').textContent  = pvTotal !== null ? fmtKwh(pvTotal) : '—';
   document.getElementById('fa-gv').textContent     = gridV  ? gridV.toFixed(0)  + 'V'  : '—';
   document.getElementById('fa-hz').textContent     = gridHz ? gridHz.toFixed(2) + 'Hz' : '—';
@@ -1085,15 +1121,27 @@ function buildGridChart(data){
   };
   // grid_power is positive=import, negative=export; negate so export shows upward (positive on chart)
   const datasets=[
+    // Grid Power: amber when importing (+), green when exporting (−) — matches hybrid dashboard
     {label:'Grid Power (W)  + import  − export',
      data:(data.power||[]).map(r=>({x:new Date(r.time),y:parseFloat(r.grid_w)||0})),
-     borderColor:'#4fc3f7',backgroundColor:'rgba(79,195,247,.06)',fill:true,tension:.2,borderWidth:1.5,pointRadius:0,yAxisID:'y'},
+     borderColor:'#FADE2A',
+     segment:{
+       borderColor:     ctx=>ctx.p1.parsed.y<0?'#2ecc71':'#FADE2A',
+       backgroundColor: ctx=>ctx.p1.parsed.y<0?'rgba(46,204,113,.08)':'rgba(250,222,42,.08)',
+     },
+     fill:true,tension:.2,borderWidth:1.5,pointRadius:0,yAxisID:'y'},
+    // Grid Voltage: cyan on right axis — visually distinct from power line
     {label:'Grid Voltage (V)',
      data:(data.voltage||[]).map(r=>({x:new Date(r.time),y:parseFloat(r.grid_v)||0})),
      borderColor:'#4fc3f7',backgroundColor:'transparent',fill:false,tension:.2,borderWidth:1.5,pointRadius:0,yAxisID:'y1'},
   ];
-  // Positive = importing from grid (above zero line)
-  // Negative = exporting to grid (below zero line)
+  // Positive (amber) = importing from grid — above zero line
+  // Negative (green) = exporting to grid — below zero line
+  opts.scales.y.ticks.color='#FADE2A';
+  // Zero baseline — visually marks the import/export crossover point
+  opts.scales.y.grid.color = ctx => ctx.tick.value === 0
+    ? 'rgba(255,255,255,0.25)'
+    : 'rgba(255,255,255,.04)';
   opts.scales.y.ticks.callback=v=>{
     if(Math.abs(v)<1) return '0';
     return (v>0?'+':'-')+fmt(Math.abs(v));

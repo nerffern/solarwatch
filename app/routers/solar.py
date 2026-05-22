@@ -149,7 +149,7 @@ def _get_flow(site: str) -> dict:
                 load_power, dc_temp, inverter_temp, total_pv_energy, time
             FROM solar_readings
             WHERE site_name ILIKE :site
-            AND time > NOW() - INTERVAL '10 minutes'
+            AND time > NOW() - INTERVAL '20 minutes'
             ORDER BY inverter_name, time DESC
         ) latest
         """,
