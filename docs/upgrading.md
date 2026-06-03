@@ -60,7 +60,7 @@ sudo systemctl list-units | grep -i solar
 ```bash
 # Update the image tag in your tenant values file, then:
 helm upgrade --install solarwatch deploy/helm/solarwatch \
-  -f deploy/tenants/solarwatch/values.yaml \
+  -f deploy/tenants/hfi/values.yaml \
   --namespace solarwatch
 
 # Monitor the rollout

@@ -48,5 +48,6 @@ coverage.xml
 # Distribution
 *.zip
 *.tar.gz
-/deploy/tenants/hfi/hfi_values.yaml
-deploy/tenants/hfi/values.yaml
+# Helm tenant values — contain real passwords, NEVER commit these
+deploy/tenants/*/values.yaml
+!deploy/tenants/example/values.yaml

@@ -530,18 +530,48 @@ kubectl create secret docker-registry hfisystems-registry \
   --namespace solarwatch
 ```
 
+### Prepare the database
+
+The K8s deployment uses a dedicated DB user (`solarwatch_k8s`) separate from
+the systemd user — allows a safe parallel transition with zero downtime.
+
+Connect to the `solarwatch` database as superuser and run:
+
+```sql
+CREATE USER solarwatch_k8s WITH PASSWORD 'your-strong-password';
+GRANT CONNECT ON DATABASE solarwatch TO solarwatch_k8s;
+GRANT USAGE ON SCHEMA public TO solarwatch_k8s;
+GRANT CREATE ON SCHEMA public TO solarwatch_k8s;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO solarwatch_k8s;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO solarwatch_k8s;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO solarwatch_k8s;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO solarwatch_k8s;
+
+-- Grant ownership so the app can run ALTER TABLE on startup
+ALTER TABLE web_users        OWNER TO solarwatch_k8s;
+ALTER TABLE roles            OWNER TO solarwatch_k8s;
+ALTER TABLE sites            OWNER TO solarwatch_k8s;
+ALTER TABLE solar_readings   OWNER TO solarwatch_k8s;
+ALTER TABLE weather_readings OWNER TO solarwatch_k8s;
+ALTER TABLE user_sites       OWNER TO solarwatch_k8s;
+```
+
+> **Why ownership?** SolarWatch runs `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+> on startup. PostgreSQL requires the user to own the table to ALTER it —
+> GRANT alone is not enough.
+
 ### Configure a tenant values file
 
 ```bash
-mkdir -p deploy/tenants/solarwatch
-cp deploy/tenants/example/values.yaml deploy/tenants/solarwatch/values.yaml
+mkdir -p deploy/tenants/hfi
+cp deploy/tenants/example/values.yaml deploy/tenants/hfi/values.yaml
 ```
 
 Key values to set (all others have safe defaults):
 
 ```yaml
 image:
-  tag: "1.0.0"              # must match VERSION file
+  tag: "v1.0.0"              # must match VERSION file
 
 database:
   host: postgres-ha.hfisystems.com
@@ -562,7 +592,7 @@ collector:
   enabled: true
   # No zone needed — collector prefers lnr, fails over to xne then pen automatically.
   # All inverters are reachable from all sites (Deye WAN, Sungrow/Sunsynk cloud, Victron MQTT).
-  sungrowPollInterval: "90"
+  sungrowPollInterval: "60"
 ```
 
 ### Deploy
@@ -570,7 +600,7 @@ collector:
 ```bash
 # Install / upgrade (same command for both — Helm is idempotent)
 helm upgrade --install solarwatch deploy/helm/solarwatch \
-  -f deploy/tenants/solarwatch/values.yaml \
+  -f deploy/tenants/hfi/values.yaml \
   --namespace solarwatch
 
 # Check all pods
@@ -638,7 +668,7 @@ The old collector pod is terminated, a new one starts in the Xneelo zone.
 ```bash
 # Update VERSION, build and push new Docker image, then:
 helm upgrade solarwatch deploy/helm/solarwatch \
-  -f deploy/tenants/solarwatch/values.yaml \
+  -f deploy/tenants/hfi/values.yaml \
   --namespace solarwatch
 ```
 

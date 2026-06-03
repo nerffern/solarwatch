@@ -10,6 +10,13 @@ metadata:
     release: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  # Zero-downtime rolling updates: always bring up a new pod before taking down the old one.
+  # maxUnavailable=0 ensures traffic is never dropped during deploys.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: solarwatch
@@ -27,8 +34,8 @@ spec:
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
 
-      # Spread web pods across zones (xne, lnr) — matches your WTS topology.
-      # Requires nodes to be labelled: topology.kubernetes.io/zone=xne|lnr
+      # Spread web pods across zones (lnr, xne, pen) — matches your WTS topology.
+      # Requires nodes to be labelled: topology.kubernetes.io/zone=lnr|xne|pen
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
