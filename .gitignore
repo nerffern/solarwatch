@@ -48,3 +48,4 @@ coverage.xml
 # Distribution
 *.zip
 *.tar.gz
+/deploy/tenants/hfi/hfi_values.yaml
