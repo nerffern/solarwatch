@@ -199,7 +199,7 @@ spec:
             - name: RETRY_DELAY
               value: {{ .Values.collector.retryDelay | quote }}
             - name: SUNGROW_POLL_INTERVAL
-              value: {{ .Values.collector.sungrowPollInterval | default "90" | quote }}
+              value: {{ .Values.collector.sungrowPollInterval | default "60" | quote }}
 
           resources:
             {{- toYaml .Values.collectorResources | nindent 12 }}

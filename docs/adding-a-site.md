@@ -149,6 +149,71 @@ sudo journalctl -u solarwatch-collector -f
 
 ---
 
+## Sungrow inverter
+
+Sungrow inverters are polled via the iSolarCloud REST API. You need a
+Sungrow developer account to obtain an **Appkey** and **Secret** — these
+are set once in the `.env` file (or Helm `secrets.sungrowAppkey/Secret`)
+and shared across all Sungrow sites.
+
+**Prerequisites:**
+- Register at the [iSolarCloud Developer Portal](https://developer.isolarcloud.com)
+- Create an application to obtain `SUNGROW_APPKEY` and `SUNGROW_SECRET`
+- Set them in your `.env` file or Helm tenant values before starting the collector
+
+**Steps:**
+
+1. Go to **Sites → Add site**
+2. Fill in:
+   - **Site name** — internal ID (e.g. `bitrad_factory`)
+   - **Display name** — shown on the dashboard (e.g. `Bitrad A Factory`)
+   - **Source type** — select `Sungrow — iSolarCloud API`
+   - **Inverter topology** — select `Grid-tie (three phase)` for SG125CX-P2 type inverters
+   - **Location** and **Latitude / Longitude**
+3. Click **Create site**
+4. Under **Sungrow credentials**, enter:
+   - **iSolarCloud username** — plant owner's login email
+   - **iSolarCloud password** — plant owner's password
+   - **Plant ID (ps_id)** — found by running `test_sungrow.py` or from the
+     iSolarCloud portal URL when viewing your plant
+5. Enable the site
+
+**Finding your Plant ID (ps_id):**
+
+Run the included test script from the project root:
+```bash
+python test_sungrow.py
+```
+This logs in and lists all plants with their `ps_id`. Alternatively, log in
+to [web3.isolarcloud.com.hk](https://web3.isolarcloud.com.hk) — the ps_id
+appears in the URL when viewing your plant.
+
+**Checking it works:**
+```bash
+sudo journalctl -u solarwatch-collector -f
+# Look for:  [BitradFactory/Inverter1] Status=Generating AC=33500W ...
+```
+
+**Smart meter (DTSD1352-A):**
+If your Sungrow installation includes a smart meter (device type 7), the
+collector automatically detects and polls it. This provides:
+- Real-time site load power (`load_power = ac_output + meter_reading`)
+- Daily grid import and export energy (kWh)
+- Per-phase voltage and current
+
+No additional configuration is needed — meter data is discovered automatically
+from the device list.
+
+**Troubleshooting:**
+- `Login failed` — wrong iSolarCloud username or password
+- `No plants returned` — credentials are correct but the plant isn't visible.
+  Ensure the account has access to the plant in iSolarCloud.
+- `Meter data unavailable` — meter polling failed this cycle (iSolarCloud API
+  transient). The inverter row is still written; meter fields are NULL until
+  the next successful poll.
+
+---
+
 ## After adding a site
 
 1. Wait up to 5 minutes for the collector to pick up the new config
