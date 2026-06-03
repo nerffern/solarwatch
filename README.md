@@ -485,25 +485,30 @@ docker compose up
 
 ## Kubernetes / Helm deployment
 
-The `deploy/helm/solarwatch` chart deploys the web app. The collector is
-deployed separately (systemd on a worker node or as its own Deployment).
-
-The chart deploys **both** the web app and the collector from a single Helm release.
-The chart structure mirrors the WTS chart so deployment procedures are identical.
+The `deploy/helm/solarwatch` chart deploys **both** the web app and the collector
+from a single Helm release. The chart structure mirrors the WTS chart so
+deployment procedures are identical.
 
 ### Prerequisites
 
-Your K8s nodes must be labelled with `topology.kubernetes.io/zone`:
-```bash
-# Label Lanner nodes
-kubectl label node <lanner-node> topology.kubernetes.io/zone=lnr
+Your K8s nodes must be labelled with `topology.kubernetes.io/zone`.
+This is already done in your cluster (matches the WTS pattern) but listed
+here for completeness:
 
-# Label Xneelo nodes
-kubectl label node <xneelo-node> topology.kubernetes.io/zone=xne
+```bash
+# Lanner nodes
+kubectl label node <lanner-node>  topology.kubernetes.io/zone=lnr
+
+# Xneelo nodes
+kubectl label node <xneelo-node>  topology.kubernetes.io/zone=xne
+
+# Penguin nodes
+kubectl label node <penguin-node> topology.kubernetes.io/zone=pen
 ```
 
-The web app uses `topologySpreadConstraints` to ensure one pod lands in each
-zone — matching your WTS multi-DC pattern exactly.
+The web app uses `topologySpreadConstraints` to spread 3 pods across all 3 zones.
+The collector uses `preferredDuringSchedulingIgnoredDuringExecution` affinity
+with order lnr → xne → pen — automatic failover with no manual intervention.
 
 ### Create the namespace
 
@@ -545,13 +550,19 @@ database:
   password: "your-db-password"
 
 secrets:
-  secretKey: "generate-with-python-secrets-token-hex-32"
+  secretKey: "generate-with-python-secrets-token-hex-32"  # python -c "import secrets; print(secrets.token_hex(32))"
   adminUsername: admin
   adminPassword: "strong-initial-password"
+  # Required if any site uses source_type=sungrow:
+  sungrowAppkey: "ECEB3991B78091C1493ECDEC86C3556D"
+  sungrowSecret: "4d9mwbixprcbukxxu0ndste60r82gy4i"
+  sungrowRegion: "hk"
 
 collector:
   enabled: true
-  zone: lnr                  # pin collector to Lanner (has inverter access)
+  # No zone needed — collector prefers lnr, fails over to xne then pen automatically.
+  # All inverters are reachable from all sites (Deye WAN, Sungrow/Sunsynk cloud, Victron MQTT).
+  sungrowPollInterval: "90"
 ```
 
 ### Deploy
@@ -564,7 +575,7 @@ helm upgrade --install solarwatch deploy/helm/solarwatch \
 
 # Check all pods
 kubectl get pods -n solarwatch
-# Expected: 2 web pods (one xne, one lnr) + 1 collector pod (lnr)
+# Expected: 3 web pods (one per zone: lnr, xne, pen) + 1 collector pod (lnr preferred)
 
 # Check web rollout
 kubectl rollout status deployment/solarwatch -n solarwatch
@@ -597,26 +608,27 @@ No LoadBalancer, no NodePort, no cert-manager needed. Cloudflare handles TLS.
 
 | Pod | Replicas | Zone | Purpose |
 |---|---|---|---|
-| `solarwatch-*` | 2 | xne + lnr | Web app + API (gunicorn + uvicorn) |
-| `solarwatch-collector-*` | 1 | lnr (configurable) | Polls inverters, writes to DB |
+| `solarwatch-*` | 3 | lnr + xne + pen (one per zone) | Web app + API (gunicorn + uvicorn) |
+| `solarwatch-collector-*` | 1 | lnr preferred → xne → pen (automatic failover) | Polls inverters, writes to DB |
 
 The PodDisruptionBudget ensures at least 1 web pod stays alive during node
 drains and cluster maintenance — matching the WTS `minAvailable: 1` pattern.
 
-### Moving the collector between DCs
+### Collector failover
 
-If Lanner is down and you need the collector to run from Xneelo:
+The collector uses `preferredDuringSchedulingIgnoredDuringExecution` affinity
+with weighted zone preferences: **lnr (100) → xne (75) → pen (50)**.
 
-```yaml
-# In your tenant values.yaml
-collector:
-  zone: xne
-```
+If LNR goes down, K8s automatically reschedules the collector pod to XNE.
+If XNE is also unavailable, it falls back to PEN. No manual intervention needed.
 
+When LNR recovers, the pod stays where it is until the next restart or redeploy,
+at which point it will naturally land back on LNR. This avoids unnecessary
+churn during transient failures.
+
+To force the collector back to LNR after a site recovers:
 ```bash
-helm upgrade solarwatch deploy/helm/solarwatch \
-  -f deploy/tenants/solarwatch/values.yaml \
-  --namespace solarwatch
+kubectl rollout restart deployment/solarwatch-collector -n solarwatch
 ```
 
 The old collector pod is terminated, a new one starts in the Xneelo zone.

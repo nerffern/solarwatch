@@ -131,17 +131,35 @@ spec:
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
 
-      # Pin collector to a specific zone — the one with inverter network access.
-      # Change collector.zone in values.yaml to move it between DCs.
+      # Collector zone preference — soft affinity with priority order.
+      # Since all inverters are reachable from all sites (Deye over WAN,
+      # Sungrow/Sunsynk cloud API, Victron MQTT), the collector can run
+      # from any zone. Preferred order: lnr → xne → pen.
+      # If lnr goes down K8s reschedules automatically to xne, then pen.
       affinity:
         nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
                   - key: topology.kubernetes.io/zone
                     operator: In
                     values:
-                      - {{ .Values.collector.zone | quote }}
+                      - lnr
+            - weight: 75
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - xne
+            - weight: 50
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - pen
 
       # If the collector crashes, restart it. Never replace with 0 replicas.
       # Kubernetes handles restarts automatically.
@@ -172,7 +190,9 @@ spec:
             - name: MAX_RETRIES
               value: {{ .Values.collector.maxRetries | quote }}
             - name: RETRY_DELAY
-              value: {{ .Values.collector.retryDelay | quote }}"
+              value: {{ .Values.collector.retryDelay | quote }}
+            - name: SUNGROW_POLL_INTERVAL
+              value: {{ .Values.collector.sungrowPollInterval | default "90" | quote }}
 
           resources:
             {{- toYaml .Values.collectorResources | nindent 12 }}

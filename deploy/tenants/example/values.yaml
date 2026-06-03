@@ -13,20 +13,21 @@ image:
   pullPolicy: Always
   pullSecret: hfisystems-registry
 
-# Web app: 2 replicas minimum — one in xne, one in lnr
+# 3 replicas — one per zone (lnr, xne, pen)
 # Spread enforced by topologySpreadConstraints on topology.kubernetes.io/zone
-replicaCount: 2
+replicaCount: 3
 gunicornWorkers: 2
 
 # Collector: single pod pinned to the zone with inverter access
 collector:
   enabled: true
-  zone: lnr          # Change to xne if inverters are reachable from Xneelo
+  # zone: automatic — lnr preferred, fails over to xne then pen
   pollInterval: "60"
   weatherInterval: "900"
   configReload: "300"
   maxRetries: "3"
   retryDelay: "5"
+  sungrowPollInterval: "60"  # matches live .env; catches iSolarCloud updates within 60s
 
 # Database — matches setup.sql defaults
 database:
@@ -41,6 +42,10 @@ secrets:
   secretKey: "REPLACE-WITH-python-secrets-token-hex-32"
   adminUsername: admin
   adminPassword: "REPLACE-BEFORE-FIRST-LOGIN"
+  # Sungrow iSolarCloud developer credentials — leave empty if no Sungrow sites
+  sungrowAppkey: ""
+  sungrowSecret: ""
+  sungrowRegion: "hk"
 
 env:
   APP_ENV: production

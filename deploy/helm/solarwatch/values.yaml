@@ -17,8 +17,8 @@ image:
   pullSecret: hfisystems-registry   # name of docker-registry secret in the namespace
 
 # ── Web app replicas ──────────────────────────────────────────────────────────
-# Must be >= 2 for HA. Pods are spread across zones (xne, lnr).
-replicaCount: 2
+# 3 = one pod per zone (lnr, xne, pen) — recommended for full 3-site HA.
+replicaCount: 3
 
 # Gunicorn workers per pod. Rule: (2 × vCPU) + 1. For 1 vCPU pods → 2.
 # Scale throughput by adding pods (replicaCount), not workers.
@@ -30,15 +30,16 @@ gunicornWorkers: 2
 # Set enabled: true once the namespace and DB are provisioned.
 collector:
   enabled: true
-  # Zone to pin the collector pod to. Pick whichever DC has inverter access.
-  # Must match a topology.kubernetes.io/zone label on your nodes.
-  # e.g. "lnr" for Lanner, "xne" for Xneelo.
-  zone: lnr
+  # Zone failover is automatic: lnr (preferred) → xne → pen.
+  # No zone config needed — see deployment.yaml affinity weights.
   pollInterval: "60"
   weatherInterval: "900"
   configReload: "300"
   maxRetries: "3"
   retryDelay: "5"
+  # How often to poll Sungrow iSolarCloud (seconds).
+  # iSolarCloud refreshes data every ~5 minutes — polling more often wastes API quota.
+  sungrowPollInterval: "60"
 
 # ── Database credentials ───────────────────────────────────────────────────────
 # Assembled into the solarwatch-secrets Secret by the secret.yaml template.
@@ -59,6 +60,11 @@ secrets:
   secretKey: ""          # REQUIRED — set in your tenant values file
   adminUsername: admin
   adminPassword: change-me-on-first-login
+  # Sungrow iSolarCloud developer app credentials.
+  # Set in your tenant values file — leave empty if no Sungrow sites.
+  sungrowAppkey: ""
+  sungrowSecret: ""
+  sungrowRegion: "hk"   # hk = Asia-Pacific/South Africa, eu = Europe
 
 # ── Non-sensitive environment config ──────────────────────────────────────────
 env:
